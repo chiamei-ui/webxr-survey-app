@@ -101,12 +101,19 @@
       </div>
     </div>
 
-    <div class="btn-group">
-      <!-- 傳統 WebXR AR 按鈕容器 -->
-      <div id="ar-button-container"></div>
-      <!-- 匯入照片合成模式 -->
-      <button id="btn-photo-import" class="action-btn upload">匯入舊照片合成機台</button>
-      <input type="file" id="image-upload" accept="image/*" class="hidden">
+    <div class="form-group">
+      <label>模式選擇:</label>
+      <div class="btn-group-vertical">
+        <!-- WebXR AR 按鈕容器 (Three.js 在此生成按鈕) -->
+        <div id="ar-button-container"></div>
+        <div id="ios-hint" class="hint-text hidden">⚠️ iOS 使用者若無法開啟 AR，請改用「相片合成模式」</div>
+
+        <div class="divider"><span>或</span></div>
+
+        <!-- 匯入照片合成模式 -->
+        <button id="btn-photo-import" class="action-btn upload">📷 匯入舊照片合成機台</button>
+        <input type="file" id="image-upload" accept="image/*" class="hidden">
+      </div>
     </div>
   </div>
 

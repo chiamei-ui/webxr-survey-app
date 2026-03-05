@@ -29,6 +29,43 @@ html {
   align-items: center;
 }
 
+.btn-group-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-group-vertical>* {
+  width: 100%;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: #888;
+  margin: 5px 0;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid #444;
+}
+
+.divider span {
+  padding: 0 10px;
+  font-size: 0.8rem;
+}
+
+.hint-text {
+  font-size: 0.8rem;
+  color: #ffaa00;
+  text-align: center;
+  margin-top: 5px;
+}
+
 .hidden {
   display: none !important;
 }

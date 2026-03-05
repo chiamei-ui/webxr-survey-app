@@ -158,21 +158,31 @@ function initThree() {
     renderer.xr.enabled = true;
     container.appendChild(renderer.domElement);
 
-    // 建立 AR 按鈕並置入 UI (確保按鈕被點擊時，我們先讀取使用者選項)
+    // 建立 AR 按鈕並置入 UI
+    if (navigator.xr) {
+        navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+            if (!supported) {
+                document.getElementById('ios-hint').classList.remove('hidden');
+            }
+        });
+    } else {
+        document.getElementById('ios-hint').classList.remove('hidden');
+    }
+
     const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
     arButton.addEventListener('click', () => {
         // 進入 AR 模式前，收集選中的 Model
         const checkboxes = document.querySelectorAll('#model-list input:checked');
+        if (checkboxes.length === 0) {
+            alert("請至少選擇一個機型");
+            // 由於 ARButton 會自動發起 session，若沒選機型需要額外處理
+            // 這裡簡單先讓它過，但在 onSelect 擋掉
+        }
         selectedModels = Array.from(checkboxes).map(cb => ({
             w: parseFloat(cb.dataset.w) / 100, // 公分轉公尺
             h: parseFloat(cb.dataset.h) / 100,
             img: cb.dataset.img
         }));
-
-        if (selectedModels.length === 0) {
-            alert("請至少選擇一個機型");
-            return;
-        }
 
         // 切換 UI 層
         document.getElementById('setup-ui').classList.add('hidden');
@@ -202,19 +212,19 @@ function initThree() {
 // 依照 2.5d-billboard 邏輯產生 PlaneGeometry
 function createBillboard(modelDef) {
     const textureLoader = new THREE.TextureLoader();
+    // 解決可能的 CORS 或快取問題
+    textureLoader.setCrossOrigin('anonymous');
     const texture = textureLoader.load(modelDef.img);
     texture.colorSpace = THREE.SRGBColorSpace;
 
-    // 1. Entity & 3. Dimensions
     const geometry = new THREE.PlaneGeometry(modelDef.w, modelDef.h);
-    geometry.translate(0, modelDef.h / 2, 0); // 中心對齊到底邊
+    geometry.translate(0, modelDef.h / 2, 0);
 
-    // 2. Material
     const material = new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
         side: THREE.DoubleSide,
-        depthWrite: false // 避免透明邊緣穿插破圖
+        depthWrite: false
     });
 
     return new THREE.Mesh(geometry, material);
@@ -344,21 +354,22 @@ function takeScreenshot() {
 // 5. 匯入照片合成模式 (Offline AR)
 // ==================================================================
 let photoScene, photoCamera, photoRenderer;
-let photoTargetBillboard = null; // 當前被選中要在相片上操作的看板
+let photoTargets = []; // 存放照片模式下的機台
 let isDragging = false;
 let previousMousePosition = { x: 0, y: 0 };
 let initialPinchDistance = null;
 let initialScale = { x: 1, y: 1, z: 1 };
 
 function startPhotoARMode(imageSrc) {
+    // 隱藏選單
     document.getElementById('setup-ui').classList.add('hidden');
     document.getElementById('photo-ar-ui').classList.remove('hidden');
 
     const container = document.createElement('div');
     container.id = 'photo-ar-container';
-    container.style.position = 'absolute';
+    container.style.position = 'fixed';
     container.style.top = '0'; container.style.left = '0';
-    container.style.width = '100%'; container.style.height = '100%';
+    container.style.width = '100vw'; container.style.height = '100vh';
     container.style.zIndex = '5';
     document.body.appendChild(container);
 
@@ -371,28 +382,31 @@ function startPhotoARMode(imageSrc) {
         photoScene.background = texture;
     });
 
-    photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 100);
-    // 將相機往後拉一點以看見完整平面
+    photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
     photoCamera.position.z = 5;
 
-    const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
-    light.position.set(0.5, 1, 0.25);
+    const light = new THREE.AmbientLight(0xffffff, 1.5); // 環境光
     photoScene.add(light);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+    dirLight.position.set(1, 1, 1);
+    photoScene.add(dirLight);
 
     photoRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     photoRenderer.setPixelRatio(window.devicePixelRatio);
     photoRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(photoRenderer.domElement);
 
-    // 實例化第一個選擇的看板放到畫面中央
-    if (selectedModels.length > 0) {
-        photoTargetBillboard = createBillboard(selectedModels[0]);
-        // 放低一點比較像在地板
-        photoTargetBillboard.position.set(0, -1, 0);
-        photoScene.add(photoTargetBillboard);
-    }
+    // 實例化所有選取的看板，並列排開
+    photoTargets = [];
+    selectedModels.forEach((modelDef, index) => {
+        const billboard = createBillboard(modelDef);
+        // 並列分散位置
+        billboard.position.set((index - (selectedModels.length - 1) / 2) * 1.5, -1, 0);
+        photoScene.add(billboard);
+        photoTargets.push(billboard);
+    });
 
-    // 綁定手勢事件
+    // 綁定手勢事件 (操作第一台或是全部連動)
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
     photoRenderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
     photoRenderer.domElement.addEventListener('touchend', onTouchEnd, { passive: false });
@@ -408,7 +422,7 @@ function startPhotoARMode(imageSrc) {
 }
 
 function onTouchStart(e) {
-    if (!photoTargetBillboard) return;
+    if (photoTargets.length === 0) return;
     if (e.touches.length === 1) {
         isDragging = true;
         previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -417,21 +431,24 @@ function onTouchStart(e) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
-        initialScale = { ...photoTargetBillboard.scale };
+        // 以選取到的第一台作為縮放基準
+        initialScale = { ...photoTargets[0].scale };
     }
 }
 
 function onTouchMove(e) {
-    e.preventDefault(); // 防止滾頁面
-    if (!photoTargetBillboard) return;
+    if (e.preventDefault) e.preventDefault();
+    if (photoTargets.length === 0) return;
 
     if (isDragging && e.touches.length === 1) {
         const deltaX = e.touches[0].clientX - previousMousePosition.x;
         const deltaY = e.touches[0].clientY - previousMousePosition.y;
 
-        // 根據畫面滑動量微調 3D 座標 (數值可依比例調整)
-        photoTargetBillboard.position.x += deltaX * 0.01;
-        photoTargetBillboard.position.y -= deltaY * 0.01; // DOM Y 往下為正，3D Y 往上為正
+        // 移動所有並列機台
+        photoTargets.forEach(target => {
+            target.position.x += deltaX * 0.01;
+            target.position.y -= deltaY * 0.01;
+        });
 
         previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2 && initialPinchDistance) {
@@ -440,11 +457,13 @@ function onTouchMove(e) {
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         const pinchScale = distance / initialPinchDistance;
-        photoTargetBillboard.scale.set(
-            initialScale.x * pinchScale,
-            initialScale.y * pinchScale,
-            initialScale.z * pinchScale
-        );
+        photoTargets.forEach(target => {
+            target.scale.set(
+                initialScale.x * pinchScale,
+                initialScale.y * pinchScale,
+                initialScale.z * pinchScale
+            );
+        });
     }
 }
 
@@ -461,12 +480,11 @@ function takePhotoScreenshot() {
     canvas.height = window.innerHeight * window.devicePixelRatio;
     const ctx = canvas.getContext('2d');
 
-    // 將 3D (含已經綁定在 Background 的底圖) 畫上去
     ctx.drawImage(photoRenderer.domElement, 0, 0, canvas.width, canvas.height);
 
     // 疊加浮水印
-    const padding = 20;
-    ctx.font = '32px sans-serif';
+    const padding = 20 * window.devicePixelRatio;
+    ctx.font = `${24 * window.devicePixelRatio}px sans-serif`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
 
@@ -476,13 +494,13 @@ function takePhotoScreenshot() {
     const line3 = `${now}`;
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    const boxWidth = 500;
-    const boxHeight = 120;
+    const boxWidth = 400 * window.devicePixelRatio;
+    const boxHeight = 120 * window.devicePixelRatio;
     ctx.fillRect(canvas.width - boxWidth - padding, canvas.height - boxHeight - padding, boxWidth, boxHeight);
 
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(line1, canvas.width - padding - 10, canvas.height - padding - 80);
-    ctx.fillText(line2, canvas.width - padding - 10, canvas.height - padding - 45);
+    ctx.fillText(line1, canvas.width - padding - 10, canvas.height - padding - 80 * window.devicePixelRatio);
+    ctx.fillText(line2, canvas.width - padding - 10, canvas.height - padding - 45 * window.devicePixelRatio);
     ctx.fillText(line3, canvas.width - padding - 10, canvas.height - padding - 10);
 
     const dataURL = canvas.toDataURL('image/png');
@@ -491,11 +509,12 @@ function takePhotoScreenshot() {
     a.download = `合成場勘_${siteName}_${Date.now()}.png`;
     a.click();
 
-    // 返回初始化
+    // 清理與返回
     document.getElementById('post-ar-ui').classList.remove('hidden');
     document.getElementById('photo-ar-ui').classList.add('hidden');
     const container = document.getElementById('photo-ar-container');
     if (container) {
         container.remove();
+        photoRenderer.setAnimationLoop(null);
     }
 }
