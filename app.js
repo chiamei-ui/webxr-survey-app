@@ -42,6 +42,13 @@ function initUI() {
         gpsStatus.textContent = "瀏覽器不支援 GPS";
     }
 
+    // 啟動 GPS 請求時的防卡死邏輯
+    setTimeout(() => {
+        if (gpsStatus.textContent === "等待授權中...") {
+            gpsStatus.textContent = "等待授權中 (請注意瀏覽器權限提示)";
+        }
+    }, 3000);
+
     // 監聽站點輸入
     document.getElementById('site-name').addEventListener('input', (e) => {
         siteName = e.target.value || '未命名站點';
@@ -280,9 +287,11 @@ function render(timestamp, frame) {
             }
         }
 
-    });
-}
-renderer.render(scene, camera);
+        placedBillboards.forEach(bb => {
+            bb.lookAt(camera.position.x, bb.position.y, camera.position.z);
+        });
+    }
+    renderer.render(scene, camera);
 }
 
 const raycaster = new THREE.Raycaster();
