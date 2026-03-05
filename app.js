@@ -280,12 +280,14 @@ function render(timestamp, frame) {
             }
         }
 
-        placedBillboards.forEach(bb => {
-            bb.lookAt(camera.position.x, bb.position.y, camera.position.z);
-        });
-    }
-    renderer.render(scene, camera);
+    });
 }
+renderer.render(scene, camera);
+}
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let activeTarget = null; // 當前被點擊選取的機台
 
 function takeScreenshot() {
     const canvas = document.createElement('canvas');
@@ -305,8 +307,8 @@ let isDragging = false;
 let previousMousePosition = { x: 0, y: 0 };
 let initialPinchDistance = null;
 let initialPinchAngle = null;
-let initialScales = [];
-let initialRotations = [];
+let initialScale = null;
+let initialRotation = null;
 
 function startPhotoARMode(imageSrc) {
     document.getElementById('setup-ui').classList.add('hidden');
@@ -322,23 +324,31 @@ function startPhotoARMode(imageSrc) {
 
     photoScene = new THREE.Scene();
 
-    // 改用 Plane 作為背景，避免 iOS background 渲染問題
+    // 背景層
     const loader = new THREE.TextureLoader();
     loader.setCrossOrigin('anonymous');
     loader.load(imageSrc, (texture) => {
         texture.colorSpace = THREE.SRGBColorSpace;
-        // 建立一個跟攝影機視角一樣大的平面放在遠處
         const aspect = texture.image.width / texture.image.height;
-        const bgGeo = new THREE.PlaneGeometry(10 * aspect, 10);
+        const screenAspect = window.innerWidth / window.innerHeight;
+
+        let geoW, geoH;
+        if (aspect > screenAspect) {
+            geoH = 15; geoW = 15 * aspect;
+        } else {
+            geoW = 15 * screenAspect; geoH = geoW / aspect;
+        }
+
+        const bgGeo = new THREE.PlaneGeometry(geoW, geoH);
         const bgMat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, depthWrite: false });
         const bgMesh = new THREE.Mesh(bgGeo, bgMat);
-        bgMesh.position.z = -1; // 放在物體後面
+        bgMesh.position.z = -5;
+        bgMesh.name = "background";
         photoScene.add(bgMesh);
     });
 
-    // 調整相機 FOV 讓背景平面充滿畫面
-    photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
-    photoCamera.position.z = 8; // 拉遠相機
+    photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    photoCamera.position.z = 8;
 
     const light = new THREE.AmbientLight(0xffffff, 2.0);
     photoScene.add(light);
@@ -351,7 +361,8 @@ function startPhotoARMode(imageSrc) {
     photoTargets = [];
     selectedModels.forEach((modelDef, index) => {
         const billboard = createBillboard(modelDef);
-        billboard.position.set((index - (selectedModels.length - 1) / 2) * 2, -2, 1);
+        billboard.position.set((index - (selectedModels.length - 1) / 2) * 2, -1, 1);
+        billboard.name = `model-${index}`;
         photoScene.add(billboard);
         photoTargets.push(billboard);
     });
@@ -367,31 +378,56 @@ function startPhotoARMode(imageSrc) {
 
 function onTouchStart(e) {
     if (photoTargets.length === 0) return;
+
+    // 取得點擊座標
+    const clientX = e.touches[0].clientX;
+    const clientY = e.touches[0].clientY;
+    mouse.x = (clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+    // 檢查是否選中機台
+    raycaster.setFromCamera(mouse, photoCamera);
+    const intersects = raycaster.intersectObjects(photoTargets);
+
+    if (intersects.length > 0) {
+        activeTarget = intersects[0].object;
+        // 視覺反饋：稍微亮一點
+        photoTargets.forEach(t => t.material.color.set(0xcccccc));
+        activeTarget.material.color.set(0xffffff);
+    } else {
+        // 若點擊空白處，則不選取任何對象
+        activeTarget = null;
+        photoTargets.forEach(t => t.material.color.set(0xffffff)); // Reset colors
+    }
+
     if (e.touches.length === 1) {
         isDragging = true;
-        previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        previousMousePosition = { x: clientX, y: clientY };
     } else if (e.touches.length === 2) {
         isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
         initialPinchAngle = Math.atan2(dy, dx);
-        initialScales = photoTargets.map(t => t.scale.x);
-        initialRotations = photoTargets.map(t => t.rotation.y);
+
+        if (activeTarget) {
+            initialScale = activeTarget.scale.x;
+            initialRotation = activeTarget.rotation.y;
+        }
     }
 }
 
 function onTouchMove(e) {
     if (e.cancelable) e.preventDefault();
-    if (photoTargets.length === 0) return;
+    if (!activeTarget) return;
 
     if (isDragging && e.touches.length === 1) {
         const deltaX = e.touches[0].clientX - previousMousePosition.x;
         const deltaY = e.touches[0].clientY - previousMousePosition.y;
-        photoTargets.forEach(target => {
-            target.position.x += deltaX * 0.015;
-            target.position.y -= deltaY * 0.015;
-        });
+
+        activeTarget.position.x += deltaX * 0.015;
+        activeTarget.position.y -= deltaY * 0.015;
+
         previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2 && initialPinchDistance) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -402,11 +438,9 @@ function onTouchMove(e) {
         const pinchScale = distance / initialPinchDistance;
         const rotateDiff = angle - initialPinchAngle;
 
-        photoTargets.forEach((target, i) => {
-            const s = initialScales[i] * pinchScale;
-            target.scale.set(s, s, s);
-            target.rotation.y = initialRotations[i] - rotateDiff; // 旋轉效果
-        });
+        const s = initialScale * pinchScale;
+        activeTarget.scale.set(s, s, s);
+        activeTarget.rotation.y = initialRotation - rotateDiff;
     }
 }
 
@@ -418,7 +452,6 @@ function onTouchEnd() {
 
 function takePhotoScreenshot() {
     if (!photoRenderer) return;
-    // 強制渲染一次確保 preserveDrawingBuffer 有內容
     photoRenderer.render(photoScene, photoCamera);
     const canvas = document.createElement('canvas');
     canvas.width = photoRenderer.domElement.width;
@@ -431,20 +464,20 @@ function takePhotoScreenshot() {
 function finishAndDownload(canvas, fileNamePrefix) {
     const ctx = canvas.getContext('2d');
     const padding = 20 * window.devicePixelRatio;
-    ctx.font = `${26 * window.devicePixelRatio}px sans-serif`;
+    ctx.font = `bold ${26 * window.devicePixelRatio}px sans-serif`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
 
     const now = new Date().toLocaleString();
     const lines = [`站點: ${siteName}`, `GPS: ${gpsData.lat}, ${gpsData.lng}`, now];
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    const boxW = 420 * window.devicePixelRatio, boxH = 130 * window.devicePixelRatio;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    const boxW = 450 * window.devicePixelRatio, boxH = 140 * window.devicePixelRatio;
     ctx.fillRect(canvas.width - boxW - padding, canvas.height - boxH - padding, boxW, boxH);
 
     ctx.fillStyle = '#ffffff';
     lines.reverse().forEach((text, i) => {
-        ctx.fillText(text, canvas.width - padding - 15, canvas.height - padding - 15 - (i * 35 * window.devicePixelRatio));
+        ctx.fillText(text, canvas.width - padding - 15, canvas.height - padding - 20 - (i * 38 * window.devicePixelRatio));
     });
 
     const dataURL = canvas.toDataURL('image/png');
@@ -462,4 +495,3 @@ function finishAndDownload(canvas, fileNamePrefix) {
         photoRenderer = null;
     }
 }
-
