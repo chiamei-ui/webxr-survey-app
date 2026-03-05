@@ -1,0 +1,209 @@
+body,
+html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #000;
+  color: #fff;
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  box-sizing: border-box;
+}
+
+.setup-panel {
+  background-color: rgba(30, 30, 30, 0.95);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.form-group {
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 400px;
+}
+
+label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+input[type="text"] {
+  width: 100%;
+  padding: 10px;
+  border-radius: 5px;
+  border: none;
+  box-sizing: border-box;
+}
+
+#gps-status {
+  padding: 10px;
+  background: #333;
+  border-radius: 5px;
+  font-size: 0.9em;
+  color: #aaffaa;
+}
+
+.model-group {
+  margin-bottom: 5px;
+  background: #333;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.model-group summary {
+  padding: 10px;
+  font-weight: bold;
+  cursor: pointer;
+  background: #222;
+  user-select: none;
+}
+
+.model-group-content {
+  padding: 5px 10px;
+}
+
+#model-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: #444;
+  margin-bottom: 5px;
+  border-radius: 5px;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+#ar-button-container {
+  margin-bottom: 15px;
+}
+
+/* 浮水印預覽文字 (顯示於畫面上方) */
+#watermark-preview,
+.watermark-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 8px;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+/* 水平儀 UI (十字準星與氣泡) */
+#level-ui {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100px;
+  height: 100px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.axis {
+  position: absolute;
+  background-color: rgba(255, 255, 255, 0.5);
+}
+
+#level-x-axis {
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 1px;
+}
+
+#level-y-axis {
+  top: 0;
+  left: 50%;
+  width: 1px;
+  height: 100%;
+}
+
+#level-bubble {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  background-color: #00ff00;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: transform 0.1s ease-out;
+}
+
+/* 拍照按鈕 */
+.bottom-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  /* 讓點擊能穿透到 3D 場景( Hit-test ) */
+}
+
+.shutter-btn {
+  width: 70px;
+  height: 70px;
+  background-color: rgba(255, 255, 255, 0.5);
+  border: 4px solid #fff;
+  border-radius: 50%;
+  pointer-events: auto;
+  /* 按鈕本身可以被點擊 */
+  cursor: pointer;
+}
+
+.shutter-btn:active {
+  background-color: #fff;
+}
+
+.btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.action-btn {
+  padding: 15px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  background-color: #007bff;
+  color: white;
+}
+
+.action-btn.secondary {
+  background-color: #6c757d;
+}
+
+.action-btn.upload {
+  background-color: #28a745;
+}

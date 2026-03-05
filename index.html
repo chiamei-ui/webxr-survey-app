@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>場勘 App (WebXR)</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- 引入 Three.js -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+
+<body>
+  <!-- 第 1 層: 初始化設定介面 -->
+  <div id="setup-ui" class="overlay setup-panel">
+    <h1>WebXR 場勘系統</h1>
+    <div class="form-group">
+      <label for="site-name">站點名稱:</label>
+      <input type="text" id="site-name" placeholder="請輸入站點名稱 (如: 台北信義威秀)">
+    </div>
+
+    <div class="form-group">
+      <label>GPS 座標 (自動取得):</label>
+      <div id="gps-status">等待授權中...</div>
+    </div>
+
+    <div class="form-group">
+      <label>選擇機台型號 (多選):</label>
+      <div id="model-list">
+
+        <details class="model-group">
+          <summary>Ai4-免換袋</summary>
+          <div class="model-group-content">
+            <label><input type="checkbox" value="Ai4-1.8" data-w="180.3" data-h="220"
+                data-img="./assets/models/Ai4-免換袋1.8_W180.3 x H220 x D112.9/免換袋1.8(正).png"> 1.8</label>
+            <label><input type="checkbox" value="Ai4-2.1" data-w="208.3" data-h="220"
+                data-img="./assets/models/Ai4-免換袋2.1_W208.3 x H220 x D112.9/免換袋2.1(正).png"> 2.1</label>
+            <label><input type="checkbox" value="Ai4-2.7" data-w="268.3" data-h="220"
+                data-img="./assets/models/Ai4-免換袋2.7_W268.3x H220 x D118/2.7免換袋_V4.png"> 2.7</label>
+          </div>
+        </details>
+
+        <details class="model-group">
+          <summary>Ai4-單機+瓶蓋箱</summary>
+          <div class="model-group-content">
+            <label><input type="checkbox" value="Ai4-Cap" data-w="111.5" data-h="190"
+                data-img="./assets/models/Ai4-單機+瓶蓋箱__W111.5 x H190 x D93(含瓶蓋箱)/Ai4單機+瓶蓋箱(正).png"> 標準</label>
+          </div>
+        </details>
+
+        <details class="model-group">
+          <summary>全聯 Ai4</summary>
+          <div class="model-group-content">
+            <label><input type="checkbox" value="PX-1.8" data-w="180.3" data-h="220"
+                data-img="./assets/models/全聯Ai4-免換袋1.8_W180.3 x H220 x D112.9/全聯免換袋1.8(正).png"> 免換袋 1.8</label>
+            <label><input type="checkbox" value="PX-2.1" data-w="208.3" data-h="220"
+                data-img="./assets/models/全聯Ai4-免換袋2.1_W208.3 x H220 x D112.9/全聯免換袋2.1(正).png"> 免換袋 2.1</label>
+            <label><input type="checkbox" value="PX-2.7" data-w="268.3" data-h="220"
+                data-img="./assets/models/全聯Ai4-免換袋2.7_W268.3x H220 x D118/全聯免換袋2.7(正).png"> 免換袋 2.7</label>
+            <label><input type="checkbox" value="PX-Cap" data-w="111.5" data-h="190"
+                data-img="./assets/models/全聯Ai4-單機+瓶蓋箱__W111.5 x H190 x D93(含瓶蓋箱)/全聯Ai4單機+瓶蓋箱(正).png"> 單機+瓶蓋箱</label>
+          </div>
+        </details>
+
+        <details class="model-group">
+          <summary>台塑便利家</summary>
+          <div class="model-group-content">
+            <label><input type="checkbox" value="Formosa-v1" data-w="85" data-h="180"
+                data-img="./assets/models/台塑便利家v1-洗寶_W85 x H180 x D67/v1-洗寶(正).png"> v1-洗寶</label>
+            <label><input type="checkbox" value="Formosa-v2" data-w="88" data-h="190"
+                data-img="./assets/models/台塑便利家v2-水精靈_W88 x H190 x D85/v2-水精靈(正).png"> v2-水精靈</label>
+          </div>
+        </details>
+
+        <details class="model-group">
+          <summary>電池機</summary>
+          <div class="model-group-content">
+            <label><input type="checkbox" value="Battery-v2" data-w="41" data-h="162.3"
+                data-img="./assets/models/電池機v2_W41 x H162.3 x D47.8/電池機V2外觀(正).png"> v2</label>
+            <label><input type="checkbox" value="Battery-v3" data-w="41" data-h="175"
+                data-img="./assets/models/電池機v3_W41 x H175 x D34/電池機v3(正).png"> v3</label>
+          </div>
+        </details>
+
+        <details class="model-group">
+          <summary>其他 (H30 / 特力屋)</summary>
+          <div class="model-group-content">
+            <label><input type="checkbox" value="H30" data-w="140" data-h="205"
+                data-img="./assets/models/H30_W140 x H205 x D90.8/H30(正).png"> H30</label>
+            <label><input type="checkbox" value="TLW" data-w="268.3" data-h="220"
+                data-img="./assets/models/特力屋_W268.3x H220 x D118/特力屋(正).png"> 特力屋</label>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="btn-group">
+      <!-- 傳統 WebXR AR 按鈕容器 -->
+      <div id="ar-button-container"></div>
+      <!-- 匯入照片合成模式 -->
+      <button id="btn-photo-import" class="action-btn upload">匯入舊照片合成機台</button>
+      <input type="file" id="image-upload" accept="image/*" class="hidden">
+    </div>
+  </div>
+
+  <!-- 第 2-B 層: 舊照合成 UI (新功能) -->
+  <div id="photo-ar-ui" class="overlay hidden">
+    <!-- 這裡會用 Three.js 在背後繪製圖片與機台 -->
+    <div id="photo-watermark-preview" class="watermark-overlay">
+      <span id="photo-wm-site">站點: N/A</span><br>
+      <span id="photo-wm-gps">GPS: N/A</span><br>
+      <span id="photo-wm-time"></span>
+    </div>
+
+    <div class="bottom-bar">
+      <button id="btn-photo-shutter" class="shutter-btn"></button>
+    </div>
+  </div>
+
+  <!-- 第 2 層: AR 拍攝介面 -->
+  <div id="ar-ui" class="overlay hidden">
+    <div id="watermark-preview">
+      <span id="wm-site">站點: N/A</span><br>
+      <span id="wm-gps">GPS: N/A</span><br>
+      <span id="wm-time"></span>
+    </div>
+
+    <!-- 水平儀 UI -->
+    <div id="level-ui">
+      <!-- 水平參考線 -->
+      <div id="level-x-axis" class="axis"></div>
+      <div id="level-y-axis" class="axis"></div>
+      <!-- 會移動的氣泡點 -->
+      <div id="level-bubble"></div>
+    </div>
+
+    <div class="bottom-bar">
+      <button id="btn-shutter" class="shutter-btn"></button>
+    </div>
+  </div>
+
+  <!-- 第 3 層: 拍完後的接續畫面 -->
+  <div id="post-ar-ui" class="overlay hidden setup-panel">
+    <h2>拍攝完成！照片已下載</h2>
+    <p>照片包含 AR 合成圖 (已押上浮水印)。</p>
+    <div class="btn-group">
+      <button id="btn-continue" class="action-btn">維持同機型拍攝下一張</button>
+      <button id="btn-restart" class="action-btn secondary">更換機型 / 結束</button>
+      <button id="btn-upload" class="action-btn upload">上傳至 Kintone (Demo)</button>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+
+</html>
