@@ -80,7 +80,10 @@ function initUI() {
         selectedModels = Array.from(checkboxes).map(cb => ({
             w: parseFloat(cb.dataset.w) / 100, // 公分轉公尺
             h: parseFloat(cb.dataset.h) / 100,
-            img: cb.dataset.img
+            d: (parseFloat(cb.dataset.d) || 50) / 100,
+            img: cb.dataset.img,
+            imgL: cb.dataset.imgL || null,
+            imgR: cb.dataset.imgR || null
         }));
         fileInput.click();
     });
@@ -188,7 +191,11 @@ function initThree() {
         selectedModels = Array.from(checkboxes).map(cb => ({
             w: parseFloat(cb.dataset.w) / 100,
             h: parseFloat(cb.dataset.h) / 100,
-            img: cb.dataset.img
+            d: (parseFloat(cb.dataset.d) || 50) / 100,
+            color: cb.dataset.color || '#888888', // 取出主題色
+            img: cb.dataset.img,
+            imgL: cb.dataset.imgL || null,
+            imgR: cb.dataset.imgR || null
         }));
         document.getElementById('setup-ui').classList.add('hidden');
         document.getElementById('ar-ui').classList.remove('hidden');
@@ -211,39 +218,65 @@ function initThree() {
     renderer.setAnimationLoop(render);
 }
 
-function createBillboard(modelDef) {
+function createMachine3D(modelDef) {
     const textureLoader = new THREE.TextureLoader();
     textureLoader.setCrossOrigin('anonymous');
-    const texture = textureLoader.load(modelDef.img);
-    texture.colorSpace = THREE.SRGBColorSpace;
 
-    // 1. Entity: 建立 Plane 幾何體，並依照機台實際尺寸設定 (單位為公尺)
-    const geometry = new THREE.PlaneGeometry(modelDef.w, modelDef.h);
-    // 將中心點移至底部，方便在地面放置
-    geometry.translate(0, modelDef.h / 2, 0);
+    // 解析我們給予的 Hex 色碼字串為 THREE.Color 物件
+    const themeColor = new THREE.Color(modelDef.color);
 
-    // 2. Material: 依照 SKILL 規範設置材質
-    const material = new THREE.MeshBasicMaterial({
-        map: texture,
-        transparent: true,    // 重要：開啟透明選項
-        side: THREE.DoubleSide, // 重要：雙面顯示
-        alphaTest: 0.1,       // 協助處理透明邊緣遮擋問題
-        depthWrite: false     // 防止透明物件遮擋後方物件
+    // 準備 6 面材質 [右, 左, 上, 下, 正, 背]
+    const materials = [];
+    const faceConfigs = [
+        { key: 'imgR', fallback: modelDef.img }, // 右
+        { key: 'imgL', fallback: modelDef.img }, // 左
+        { key: null, color: themeColor },        // 上 (套用主題色)
+        { key: null, color: themeColor },        // 下 (套用主題色)
+        { key: 'img', fallback: modelDef.img },  // 正
+        { key: null, color: themeColor }         // 背 (套用主題色)
+    ];
+
+    faceConfigs.forEach((config) => {
+        const path = config.key ? (modelDef[config.key] || config.fallback) : null;
+        if (path) {
+            const texture = textureLoader.load(
+                path,
+                (tex) => {
+                    tex.colorSpace = THREE.SRGBColorSpace;
+                },
+                undefined,
+                (err) => {
+                    console.error(`🔴 貼圖加載失敗: ${path}`);
+                }
+            );
+            materials.push(new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: !!path.includes('.png'), // 如果是 png 則啟用透明度
+                alphaTest: 0.1
+            }));
+        } else {
+            materials.push(new THREE.MeshBasicMaterial({ color: config.color }));
+        }
     });
 
-    // 3. Dimensions: 結合幾何與材質建立看板
-    return new THREE.Mesh(geometry, material);
+    // 1. Entity: 建立 Box 幾何體
+    const geometry = new THREE.BoxGeometry(modelDef.w, modelDef.h, modelDef.d);
+    // 將中心點移至底部
+    geometry.translate(0, modelDef.h / 2, 0);
+
+    // 3. Dimensions: 結合幾何與材質建立模型
+    return new THREE.Mesh(geometry, materials);
 }
 
 function onSelect() {
     if (reticle.visible && selectedModels.length > 0) {
         const currentDef = selectedModels[currentModelIndex % selectedModels.length];
-        const billboard = createBillboard(currentDef);
-        billboard.position.setFromMatrixPosition(reticle.matrix);
+        const machine = createMachine3D(currentDef);
+        machine.position.setFromMatrixPosition(reticle.matrix);
         // 面向攝影機，但保持垂直
-        billboard.lookAt(camera.position.x, billboard.position.y, camera.position.z);
-        scene.add(billboard);
-        placedBillboards.push(billboard);
+        machine.lookAt(camera.position.x, machine.position.y, camera.position.z);
+        scene.add(machine);
+        placedBillboards.push(machine);
         currentModelIndex++;
         reticle.visible = false;
     }
@@ -374,11 +407,11 @@ function startPhotoARMode(imageSrc) {
 
     photoTargets = [];
     selectedModels.forEach((modelDef, index) => {
-        const billboard = createBillboard(modelDef);
-        billboard.position.set((index - (selectedModels.length - 1) / 2) * 2, -1, 1);
-        billboard.name = `model-${index}`;
-        photoScene.add(billboard);
-        photoTargets.push(billboard);
+        const machine = createMachine3D(modelDef);
+        machine.position.set((index - (selectedModels.length - 1) / 2) * 2, -1, 1);
+        machine.name = `model-${index}`;
+        photoScene.add(machine);
+        photoTargets.push(machine);
     });
 
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });

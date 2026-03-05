@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>2.5D 看板驗證工具</title>
+    <title>3D 機台模型驗證工具 (15機型)</title>
     <style>
         body {
             margin: 0;
@@ -62,10 +62,10 @@
 
 <body>
     <div id="info">
-        <h3>2.5D 看板驗證</h3>
-        <p>當前機型: <span id="model-name">加載中...</span></p>
+        <h3>3D 機台模型驗證 (15機型)</h3>
+        <p>機型: <span id="model-name">加載中...</span></p>
         <p>尺寸: <span id="model-dim">N/A</span></p>
-        <div id="status">檢查中...</div>
+        <div id="status">正在初始化...</div>
     </div>
     <div id="controls">
         <button id="prev">上一個</button>
@@ -85,7 +85,8 @@
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 1.5, 3);
+            camera.position.set(2, 2, 4);
+            camera.lookAt(0, 1, 0);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -95,11 +96,10 @@
             const grid = new THREE.GridHelper(10, 10);
             scene.add(grid);
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
             scene.add(ambientLight);
 
             window.addEventListener('resize', onWindowResize);
-
             document.getElementById('prev').onclick = () => showModel(currentIndex - 1);
             document.getElementById('next').onclick = () => showModel(currentIndex + 1);
 
@@ -107,16 +107,23 @@
         }
 
         function loadModelList() {
-            // 模擬從 index.html 抓取資料 (此處寫死以快速驗證)
-            // 實際測試時可以直接在瀏覽器控制台執行此邏輯
-            const rawModels = [
-                { name: "Ai4-免換袋 1.8", w: 1.803, h: 2.2, img: "./assets/models/Ai4-免換袋1.8_W180.3 x H220 x D112.9/免換袋1.8(正).png" },
-                { name: "Ai4-免換袋 2.1", w: 2.083, h: 2.2, img: "./assets/models/Ai4-免換袋2.1_W208.3 x H220 x D112.9/免換袋2.1(正).png" },
-                { name: "電池機 v2", w: 0.41, h: 1.623, img: "./assets/models/電池機v2_W41 x H162.3 x D47.8/電池機V2合成版(正).png" },
-                { name: "H30 整合機", w: 1.4, h: 2.05, img: "./assets/models/H30_W140 x H205 x D90.8/H30-all_1422x800.png" }
-                // ...可手動擴充其餘 10 個
+            models = [
+                { name: "Ai4-免換袋 1.8", w: 1.803, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/ai4_1.8/front.png", imgL: "./assets/models/ai4_1.8/left.png", imgR: "./assets/models/ai4_1.8/right.png" },
+                { name: "Ai4-免換袋 2.1", w: 2.083, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/ai4_2.1/front.png", imgL: "./assets/models/ai4_2.1/left.png", imgR: "./assets/models/ai4_2.1/right.png" },
+                { name: "Ai4-免換袋 2.7", w: 2.683, h: 2.2, d: 1.18, color: "#F8C700", img: "./assets/models/ai4_2.7/front.png", imgL: "./assets/models/ai4_2.7/left.png", imgR: "./assets/models/ai4_2.7/right.png" },
+                { name: "Ai4-全聯免換袋 1.8", w: 1.803, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/px_ai4_1.8/front.png" },
+                { name: "Ai4-全聯免換袋 2.1", w: 2.083, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/px_ai4_2.1/front.png", imgL: "./assets/models/px_ai4_2.1/left.png", imgR: "./assets/models/px_ai4_2.1/right.png" },
+                { name: "Ai4-全聯免換袋 2.7", w: 2.683, h: 2.2, d: 1.18, color: "#F8C700", img: "./assets/models/px_ai4_2.7/front.png", imgR: "./assets/models/px_ai4_2.7/right.png" },
+                { name: "Ai4-標準單機+瓶蓋箱", w: 1.115, h: 1.9, d: 0.93, color: "#EA5106", img: "./assets/models/ai4_cap/front.png" },
+                { name: "Ai4-全聯單機+瓶蓋箱", w: 1.115, h: 1.9, d: 0.93, color: "#F8C700", img: "./assets/models/px_ai4_cap/front.png", imgL: "./assets/models/px_ai4_cap/left.png", imgR: "./assets/models/px_ai4_cap/right.png" },
+                { name: "台塑-洗寶", w: 0.85, h: 1.8, d: 0.67, color: "#CCE0ED", img: "./assets/models/formosa_v1/front.png", imgL: "./assets/models/formosa_v1/left.png" },
+                { name: "台塑-水精靈", w: 0.88, h: 1.9, d: 0.85, color: "#000000", img: "./assets/models/formosa_v2/front.png", imgL: "./assets/models/formosa_v2/left.png", imgR: "./assets/models/formosa_v2/right.png" },
+                { name: "電池機 v2", w: 0.41, h: 1.623, d: 0.478, color: "#E9CA4D", img: "./assets/models/battery_v2/front.png", imgR: "./assets/models/battery_v2/right.png" },
+                { name: "電池機 v3 (室內)", w: 0.41, h: 1.75, d: 0.34, color: "#FFFFFF", img: "./assets/models/battery_v3_in/front.png", imgL: "./assets/models/battery_v3_in/left.png", imgR: "./assets/models/battery_v3_in/right.png" },
+                { name: "電池機 v3 (室外)", w: 0.41, h: 1.75, d: 0.34, color: "#FFFFFF", img: "./assets/models/battery_v3_out/front.png", imgL: "./assets/models/battery_v3_out/left.png", imgR: "./assets/models/battery_v3_out/right.png" },
+                { name: "H30 整合機", w: 1.4, h: 2.05, d: 0.908, color: "#F8C700", img: "./assets/models/h30/front.png", imgL: "./assets/models/h30/left.png", imgR: "./assets/models/h30/right.png" },
+                { name: "特力屋 2.7", w: 2.683, h: 2.2, d: 1.18, color: "#F8C700", img: "./assets/models/tlw/front.png", imgL: "./assets/models/tlw/left.png", imgR: "./assets/models/tlw/right.png" }
             ];
-            models = rawModels;
             showModel(0);
         }
 
@@ -127,37 +134,68 @@
 
             const def = models[currentIndex];
             document.getElementById('model-name').textContent = def.name;
-            document.getElementById('model-dim').textContent = `${def.w}m x ${def.h}m`;
+            document.getElementById('model-dim').textContent = `${def.w}m x ${def.h}m x ${def.d}m`;
+            document.getElementById('status').innerHTML = "正在加載貼圖...";
 
             if (currentMesh) scene.remove(currentMesh);
 
             const textureLoader = new THREE.TextureLoader();
-            const texture = textureLoader.load(def.img, (tex) => {
-                const material = new THREE.MeshBasicMaterial({
-                    map: tex,
-                    transparent: true,
-                    side: THREE.DoubleSide,
-                    alphaTest: 0.1
-                });
+            const materials = [];
+            const themeColor = new THREE.Color(def.color || "#888888");
 
-                const geometry = new THREE.PlaneGeometry(def.w, def.h);
-                geometry.translate(0, def.h / 2, 0);
+            const faceConfigs = [
+                { src: def.imgR || def.img, color: 0xffffff }, // 右
+                { src: def.imgL || def.img, color: 0xffffff }, // 左
+                { src: null, color: themeColor },              // 上
+                { src: null, color: themeColor },              // 下
+                { src: def.img, color: 0xffffff },             // 正
+                { src: null, color: themeColor }               // 背
+            ];
 
-                currentMesh = new THREE.Mesh(geometry, material);
-                scene.add(currentMesh);
-
-                // 自動屬性檢查
-                const checks = [];
-                if (material.transparent) checks.push("✅ 透明度開啟"); else checks.push("❌ 透明度關閉");
-                if (material.side === THREE.DoubleSide) checks.push("✅ 雙面顯示"); else checks.push("❌ 單面顯示");
-                document.getElementById('status').innerHTML = checks.join("<br>");
-
-                console.log(`Model Validated: ${def.name}`, {
-                    transparent: material.transparent,
-                    side: material.side === THREE.DoubleSide ? "Double" : "Single",
-                    size: `${def.w}x${def.h}`
-                });
+            let loadedCount = 0;
+            faceConfigs.forEach((config, i) => {
+                if (config.src) {
+                    textureLoader.load(config.src,
+                        (tex) => {
+                            tex.colorSpace = THREE.SRGBColorSpace;
+                            materials[i] = new THREE.MeshBasicMaterial({
+                                map: tex,
+                                transparent: !!config.src.includes('.png'),
+                                alphaTest: 0.1
+                            });
+                            checkReady();
+                        },
+                        undefined,
+                        (err) => {
+                            console.error("🔴 加載失敗:", config.src);
+                            materials[i] = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                            checkReady();
+                        }
+                    );
+                } else {
+                    materials[i] = new THREE.MeshBasicMaterial({ color: config.color });
+                    checkReady();
+                }
             });
+
+            function checkReady() {
+                loadedCount++;
+                if (loadedCount === 6) {
+                    const geometry = new THREE.BoxGeometry(def.w, def.h, def.d);
+                    geometry.translate(0, def.h / 2, 0);
+                    currentMesh = new THREE.Mesh(geometry, materials);
+                    scene.add(currentMesh);
+
+                    const failed = faceConfigs.some((s, idx) => s && materials[idx].map === null && materials[idx].color?.getHex() === 0xff0000);
+                    if (failed) {
+                        document.getElementById('status').innerHTML = "⚠️ 部分面加載失敗 (紅色)";
+                        document.getElementById('status').style.color = "orange";
+                    } else {
+                        document.getElementById('status').innerHTML = "✅ 3D 模型加載、貼圖正常";
+                        document.getElementById('status').style.color = "#00ff00";
+                    }
+                }
+            }
         }
 
         function onWindowResize() {
@@ -169,7 +207,7 @@
         function animate() {
             requestAnimationFrame(animate);
             if (currentMesh) {
-                currentMesh.rotation.y += 0.01; // 自動旋轉以便檢查雙面
+                currentMesh.rotation.y += 0.005;
             }
             renderer.render(scene, camera);
         }

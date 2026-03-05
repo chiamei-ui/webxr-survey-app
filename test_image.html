@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <title>最基礎圖檔加載測試</title>
+</head>
+
+<body>
+    <h2>最基礎圖檔加載測試</h2>
+    <p>如果您能看到下方圖片，代表伺服器的路徑是通的。如果依然是「破圖」，代表您的伺服器根目錄設定有問題。</p>
+
+    <h3>測試 1: ai4_1.8/front.png</h3>
+    <img src="./assets/models/ai4_1.8/front.png" alt="載入失敗 (Test 1)" width="200" style="border: 2px solid red;">
+
+    <h3>測試 2: 電池機v2 (battery_v2/front.png)</h3>
+    <img src="./assets/models/battery_v2/front.png" alt="載入失敗 (Test 2)" width="200" style="border: 2px solid red;">
+
+    <h3>測試 3: 特力屋 (tlw/front.png)</h3>
+    <img src="./assets/models/tlw/front.png" alt="載入失敗 (Test 3)" width="200" style="border: 2px solid red;">
+
+    <script>
+        console.log("Checking image load status...");
+        document.querySelectorAll('img').forEach(img => {
+            img.onload = () => console.log("Loaded successfully: " + img.src);
+            img.onerror = () => console.error("Failed to load: " + img.src);
+        });
+    </script>
+</body>
+
+</html>

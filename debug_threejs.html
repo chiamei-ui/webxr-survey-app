@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Three.js 貼圖測試</title>
+    <style>
+        body {
+            margin: 0;
+            outline: none;
+            background: #333;
+            color: white;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="info">
+        <h3>Three.js TextureLoader Test</h3>
+        <p id="status">準備載入: ./assets/models/ai4_1.8/front.png</p>
+    </div>
+
+    <!-- Import map for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        const statusEl = document.getElementById('status');
+
+        // 1. 基本場景設置
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 3;
+
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 2. 加入光源
+        const light = new THREE.AmbientLight(0xffffff, 1);
+        scene.add(light);
+
+        // 3. 測試 TextureLoader
+        const textureLoader = new THREE.TextureLoader();
+        const testPath = './assets/models/ai4_1.8/front.png'; // 剛改好純英文安全路徑
+
+        statusEl.textContent = `[Testing] 開始載入: ${testPath}`;
+
+        textureLoader.load(
+            testPath,
+            function (texture) {
+                // 加載成功
+                statusEl.textContent = `[SUCCESS] 成功載入: ${testPath} (${texture.image.width}x${texture.image.height})`;
+                statusEl.style.color = 'lime';
+
+                texture.colorSpace = THREE.SRGBColorSpace;
+
+                // 建立一個平面來顯示這張圖
+                const aspect = texture.image.width / texture.image.height;
+                const geometry = new THREE.PlaneGeometry(1.8 * aspect, 1.8);
+                const material = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    transparent: true,
+                    side: THREE.DoubleSide
+                });
+                const plane = new THREE.Mesh(geometry, material);
+                scene.add(plane);
+
+            },
+            undefined, // onProgress callback (目前不支援)
+            function (err) {
+                // 加載失敗
+                statusEl.textContent = `[ERROR] 載入失敗: ${testPath}`;
+                statusEl.style.color = 'red';
+                console.error('Three.js load error:', err);
+
+                // 建立紅色方塊代表失敗
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                const cube = new THREE.Mesh(geometry, material);
+                scene.add(cube);
+            }
+        );
+
+        // 4. 動畫迴圈
+        function animate() {
+            requestAnimationFrame(animate);
+            // 若場景內有物體，讓它旋轉
+            scene.children.forEach(child => {
+                if (child.isMesh) {
+                    child.rotation.y += 0.01;
+                }
+            });
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+
+</html>
