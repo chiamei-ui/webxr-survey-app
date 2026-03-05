@@ -69,26 +69,31 @@ function initUI() {
         window.location.reload();
     });
 
-    // ========== 匯入照片合成模式 Start ==========
-    const fileInput = document.getElementById('image-upload');
-    document.getElementById('btn-photo-import').addEventListener('click', () => {
+    // ========== 匯入與拍照合成模式 Start ==========
+    const importInput = document.getElementById('image-upload');
+    const captureInput = document.getElementById('image-capture');
+
+    function handlePhotoAction(inputElement) {
         const checkboxes = document.querySelectorAll('#model-list input:checked');
         if (checkboxes.length === 0) {
             alert("請至少先選擇一個機型");
             return;
         }
         selectedModels = Array.from(checkboxes).map(cb => ({
-            w: parseFloat(cb.dataset.w) / 100, // 公分轉公尺
+            w: parseFloat(cb.dataset.w) / 100,
             h: parseFloat(cb.dataset.h) / 100,
             d: (parseFloat(cb.dataset.d) || 50) / 100,
             img: cb.dataset.img,
             imgL: cb.dataset.imgL || null,
             imgR: cb.dataset.imgR || null
         }));
-        fileInput.click();
-    });
+        inputElement.click();
+    }
 
-    fileInput.addEventListener('change', (e) => {
+    document.getElementById('btn-photo-import').addEventListener('click', () => handlePhotoAction(importInput));
+    document.getElementById('btn-photo-capture').addEventListener('click', () => handlePhotoAction(captureInput));
+
+    function processImageFile(e) {
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
@@ -97,7 +102,12 @@ function initUI() {
             };
             reader.readAsDataURL(file);
         }
-    });
+        // 重置 value 確保同一張圖重複選可觸發
+        e.target.value = '';
+    }
+
+    importInput.addEventListener('change', processImageFile);
+    captureInput.addEventListener('change', processImageFile);
 
     document.getElementById('btn-photo-shutter').addEventListener('click', takePhotoScreenshot);
     // ========== 匯入照片合成模式 End ==========
@@ -332,10 +342,6 @@ function render(timestamp, frame) {
     renderer.render(scene, camera);
 }
 
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
-let activeTarget = null; // 當前被點擊選取的機台
-
 function takeScreenshot() {
     const canvas = document.createElement('canvas');
     canvas.width = window.innerWidth * window.devicePixelRatio;
@@ -349,7 +355,7 @@ function takeScreenshot() {
 
 // 離線合成模式
 let photoScene, photoCamera, photoRenderer;
-let photoTargets = [];
+let photoGroup = null; // 將所有機台放入單一群組連動
 let isDragging = false;
 let previousMousePosition = { x: 0, y: 0 };
 let initialPinchDistance = null;
@@ -367,6 +373,7 @@ function startPhotoARMode(imageSrc) {
     container.style.top = '0'; container.style.left = '0';
     container.style.width = '100vw'; container.style.height = '100vh';
     container.style.zIndex = '5';
+    container.style.touchAction = 'none'; // 防止 iOS/Android 原生畫面縮放拉扯
     document.body.appendChild(container);
 
     photoScene = new THREE.Scene();
@@ -405,13 +412,13 @@ function startPhotoARMode(imageSrc) {
     photoRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(photoRenderer.domElement);
 
-    photoTargets = [];
+    photoGroup = new THREE.Group();
+    photoScene.add(photoGroup);
+
     selectedModels.forEach((modelDef, index) => {
         const machine = createMachine3D(modelDef);
-        machine.position.set((index - (selectedModels.length - 1) / 2) * 2, -1, 1);
-        machine.name = `model-${index}`;
-        photoScene.add(machine);
-        photoTargets.push(machine);
+        machine.position.set((index - (selectedModels.length - 1) / 2) * 1.5, -1, 1);
+        photoGroup.add(machine);
     });
 
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -424,56 +431,32 @@ function startPhotoARMode(imageSrc) {
 }
 
 function onTouchStart(e) {
-    if (photoTargets.length === 0) return;
-
-    // 取得點擊座標
-    const clientX = e.touches[0].clientX;
-    const clientY = e.touches[0].clientY;
-    mouse.x = (clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(clientY / window.innerHeight) * 2 + 1;
-
-    // 檢查是否選中機台
-    raycaster.setFromCamera(mouse, photoCamera);
-    const intersects = raycaster.intersectObjects(photoTargets);
-
-    if (intersects.length > 0) {
-        activeTarget = intersects[0].object;
-        // 視覺反饋：稍微亮一點
-        photoTargets.forEach(t => t.material.color.set(0xcccccc));
-        activeTarget.material.color.set(0xffffff);
-    } else {
-        // 若點擊空白處，則不選取任何對象
-        activeTarget = null;
-        photoTargets.forEach(t => t.material.color.set(0xffffff)); // Reset colors
-    }
+    if (!photoGroup) return;
 
     if (e.touches.length === 1) {
         isDragging = true;
-        previousMousePosition = { x: clientX, y: clientY };
+        previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2) {
         isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
         initialPinchAngle = Math.atan2(dy, dx);
-
-        if (activeTarget) {
-            initialScale = activeTarget.scale.x;
-            initialRotation = activeTarget.rotation.y;
-        }
+        initialScale = photoGroup.scale.x;
+        initialRotation = photoGroup.rotation.y;
     }
 }
 
 function onTouchMove(e) {
     if (e.cancelable) e.preventDefault();
-    if (!activeTarget) return;
+    if (!photoGroup) return;
 
     if (isDragging && e.touches.length === 1) {
         const deltaX = e.touches[0].clientX - previousMousePosition.x;
         const deltaY = e.touches[0].clientY - previousMousePosition.y;
 
-        activeTarget.position.x += deltaX * 0.015;
-        activeTarget.position.y -= deltaY * 0.015;
+        photoGroup.position.x += deltaX * 0.015;
+        photoGroup.position.y -= deltaY * 0.015;
 
         previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2 && initialPinchDistance) {
@@ -486,8 +469,8 @@ function onTouchMove(e) {
         const rotateDiff = angle - initialPinchAngle;
 
         const s = initialScale * pinchScale;
-        activeTarget.scale.set(s, s, s);
-        activeTarget.rotation.y = initialRotation - rotateDiff;
+        photoGroup.scale.set(s, s, s);
+        photoGroup.rotation.y = initialRotation - rotateDiff;
     }
 }
 

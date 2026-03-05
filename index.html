@@ -129,8 +129,12 @@
 
         <div class="divider"><span>或</span></div>
 
-        <!-- 拍攝或匯入照片合成模式 -->
-        <button id="btn-photo-import" class="action-btn upload">📷 拍攝或匯入照片合成機台</button>
+        <!-- 獨立的拍照按鈕 -->
+        <button id="btn-photo-capture" class="action-btn upload">📷 立即拍照合成</button>
+        <input type="file" id="image-capture" accept="image/*" capture="environment" class="hidden">
+
+        <!-- 獨立的匯入按鈕 -->
+        <button id="btn-photo-import" class="action-btn secondary">🖼️ 從相簿匯入舊照</button>
         <input type="file" id="image-upload" accept="image/*" class="hidden">
       </div>
     </div>
