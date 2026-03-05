@@ -217,16 +217,21 @@ function createBillboard(modelDef) {
     const texture = textureLoader.load(modelDef.img);
     texture.colorSpace = THREE.SRGBColorSpace;
 
+    // 1. Entity: 建立 Plane 幾何體，並依照機台實際尺寸設定 (單位為公尺)
     const geometry = new THREE.PlaneGeometry(modelDef.w, modelDef.h);
+    // 將中心點移至底部，方便在地面放置
     geometry.translate(0, modelDef.h / 2, 0);
 
+    // 2. Material: 依照 SKILL 規範設置材質
     const material = new THREE.MeshBasicMaterial({
         map: texture,
-        transparent: true,
-        side: THREE.DoubleSide,
-        depthWrite: false
+        transparent: true,    // 重要：開啟透明選項
+        side: THREE.DoubleSide, // 重要：雙面顯示
+        alphaTest: 0.1,       // 協助處理透明邊緣遮擋問題
+        depthWrite: false     // 防止透明物件遮擋後方物件
     });
 
+    // 3. Dimensions: 結合幾何與材質建立看板
     return new THREE.Mesh(geometry, material);
 }
 

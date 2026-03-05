@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <title>2.5D 看板驗證工具</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #222;
+            color: white;
+            font-family: sans-serif;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            pointer-events: none;
+        }
+
+        #status {
+            color: #00ff00;
+            font-weight: bold;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #444;
+            color: white;
+            border: 1px solid #666;
+            border-radius: 5px;
+        }
+
+        button:hover {
+            background: #555;
+        }
+    </style>
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+          }
+        }
+    </script>
+</head>
+
+<body>
+    <div id="info">
+        <h3>2.5D 看板驗證</h3>
+        <p>當前機型: <span id="model-name">加載中...</span></p>
+        <p>尺寸: <span id="model-dim">N/A</span></p>
+        <div id="status">檢查中...</div>
+    </div>
+    <div id="controls">
+        <button id="prev">上一個</button>
+        <button id="next">下一個</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        let scene, camera, renderer, currentMesh;
+        let models = [];
+        let currentIndex = 0;
+
+        init();
+        loadModelList();
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1.5, 3);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            const grid = new THREE.GridHelper(10, 10);
+            scene.add(grid);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+            scene.add(ambientLight);
+
+            window.addEventListener('resize', onWindowResize);
+
+            document.getElementById('prev').onclick = () => showModel(currentIndex - 1);
+            document.getElementById('next').onclick = () => showModel(currentIndex + 1);
+
+            animate();
+        }
+
+        function loadModelList() {
+            // 模擬從 index.html 抓取資料 (此處寫死以快速驗證)
+            // 實際測試時可以直接在瀏覽器控制台執行此邏輯
+            const rawModels = [
+                { name: "Ai4-免換袋 1.8", w: 1.803, h: 2.2, img: "./assets/models/Ai4-免換袋1.8_W180.3 x H220 x D112.9/免換袋1.8(正).png" },
+                { name: "Ai4-免換袋 2.1", w: 2.083, h: 2.2, img: "./assets/models/Ai4-免換袋2.1_W208.3 x H220 x D112.9/免換袋2.1(正).png" },
+                { name: "電池機 v2", w: 0.41, h: 1.623, img: "./assets/models/電池機v2_W41 x H162.3 x D47.8/電池機V2合成版(正).png" },
+                { name: "H30 整合機", w: 1.4, h: 2.05, img: "./assets/models/H30_W140 x H205 x D90.8/H30-all_1422x800.png" }
+                // ...可手動擴充其餘 10 個
+            ];
+            models = rawModels;
+            showModel(0);
+        }
+
+        function showModel(index) {
+            if (index < 0) index = models.length - 1;
+            if (index >= models.length) index = 0;
+            currentIndex = index;
+
+            const def = models[currentIndex];
+            document.getElementById('model-name').textContent = def.name;
+            document.getElementById('model-dim').textContent = `${def.w}m x ${def.h}m`;
+
+            if (currentMesh) scene.remove(currentMesh);
+
+            const textureLoader = new THREE.TextureLoader();
+            const texture = textureLoader.load(def.img, (tex) => {
+                const material = new THREE.MeshBasicMaterial({
+                    map: tex,
+                    transparent: true,
+                    side: THREE.DoubleSide,
+                    alphaTest: 0.1
+                });
+
+                const geometry = new THREE.PlaneGeometry(def.w, def.h);
+                geometry.translate(0, def.h / 2, 0);
+
+                currentMesh = new THREE.Mesh(geometry, material);
+                scene.add(currentMesh);
+
+                // 自動屬性檢查
+                const checks = [];
+                if (material.transparent) checks.push("✅ 透明度開啟"); else checks.push("❌ 透明度關閉");
+                if (material.side === THREE.DoubleSide) checks.push("✅ 雙面顯示"); else checks.push("❌ 單面顯示");
+                document.getElementById('status').innerHTML = checks.join("<br>");
+
+                console.log(`Model Validated: ${def.name}`, {
+                    transparent: material.transparent,
+                    side: material.side === THREE.DoubleSide ? "Double" : "Single",
+                    size: `${def.w}x${def.h}`
+                });
+            });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (currentMesh) {
+                currentMesh.rotation.y += 0.01; // 自動旋轉以便檢查雙面
+            }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+
+</html>
