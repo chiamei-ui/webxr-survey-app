@@ -192,31 +192,26 @@ input[type="text"] {
 
 /* 拍照按鈕 */
 .bottom-bar {
-  position: absolute;
-  bottom: 0;
-  left: 0;
+  position: fixed;
+  bottom: 30px;
   width: 100%;
-  height: 100px;
   display: flex;
   justify-content: center;
-  align-items: center;
   pointer-events: none;
-  /* 讓點擊能穿透到 3D 場景( Hit-test ) */
+  z-index: 20;
 }
 
 .shutter-btn {
   width: 70px;
   height: 70px;
-  background-color: rgba(255, 255, 255, 0.5);
-  border: 4px solid #fff;
+  background: white;
+  border: 5px solid rgba(255, 255, 255, 0.3);
   border-radius: 50%;
   pointer-events: auto;
-  /* 按鈕本身可以被點擊 */
-  cursor: pointer;
 }
 
 .shutter-btn:active {
-  background-color: #fff;
+  background: #ccc;
 }
 
 .btn-group {

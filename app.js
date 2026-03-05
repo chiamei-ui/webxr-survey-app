@@ -159,44 +159,39 @@ function initThree() {
     container.appendChild(renderer.domElement);
 
     // 建立 AR 按鈕並置入 UI
+    const arButtonContainer = document.getElementById('ar-button-container');
     if (navigator.xr) {
         navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
             if (!supported) {
                 document.getElementById('ios-hint').classList.remove('hidden');
+                arButtonContainer.classList.add('hidden'); // 不支援就隱藏，避免出現奇怪按鈕
             }
         });
     } else {
         document.getElementById('ios-hint').classList.remove('hidden');
+        arButtonContainer.classList.add('hidden');
     }
 
     const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
     arButton.addEventListener('click', () => {
-        // 進入 AR 模式前，收集選中的 Model
         const checkboxes = document.querySelectorAll('#model-list input:checked');
         if (checkboxes.length === 0) {
             alert("請至少選擇一個機型");
-            // 由於 ARButton 會自動發起 session，若沒選機型需要額外處理
-            // 這裡簡單先讓它過，但在 onSelect 擋掉
         }
         selectedModels = Array.from(checkboxes).map(cb => ({
-            w: parseFloat(cb.dataset.w) / 100, // 公分轉公尺
+            w: parseFloat(cb.dataset.w) / 100,
             h: parseFloat(cb.dataset.h) / 100,
             img: cb.dataset.img
         }));
-
-        // 切換 UI 層
         document.getElementById('setup-ui').classList.add('hidden');
         document.getElementById('ar-ui').classList.remove('hidden');
     });
+    arButtonContainer.appendChild(arButton);
 
-    document.getElementById('ar-button-container').appendChild(arButton);
-
-    // 控制器 (點擊螢幕)
     controller = renderer.xr.getController(0);
     controller.addEventListener('select', onSelect);
     scene.add(controller);
 
-    // 地標 (Reticle)
     reticle = new THREE.Mesh(
         new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
         new THREE.MeshBasicMaterial({ color: 0x00ff00 })
@@ -209,10 +204,8 @@ function initThree() {
     renderer.setAnimationLoop(render);
 }
 
-// 依照 2.5d-billboard 邏輯產生 PlaneGeometry
 function createBillboard(modelDef) {
     const textureLoader = new THREE.TextureLoader();
-    // 解決可能的 CORS 或快取問題
     textureLoader.setCrossOrigin('anonymous');
     const texture = textureLoader.load(modelDef.img);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -232,24 +225,14 @@ function createBillboard(modelDef) {
 
 function onSelect() {
     if (reticle.visible && selectedModels.length > 0) {
-        // 循環拿取使用者所選機台
         const currentDef = selectedModels[currentModelIndex % selectedModels.length];
-
-        // 建立 2.5D 看板
         const billboard = createBillboard(currentDef);
-
-        // 將看板放到 Reticle 的位置
         billboard.position.setFromMatrixPosition(reticle.matrix);
-        // 面向攝影機
+        // 面向攝影機，但保持垂直
         billboard.lookAt(camera.position.x, billboard.position.y, camera.position.z);
-
         scene.add(billboard);
         placedBillboards.push(billboard);
-
-        // 切換到下一個選取的模型（如果有選多的話）
         currentModelIndex++;
-
-        // 放置後可先隱藏 Reticle
         reticle.visible = false;
     }
 }
@@ -258,6 +241,11 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    if (photoRenderer) {
+        photoCamera.aspect = window.innerWidth / window.innerHeight;
+        photoCamera.updateProjectionMatrix();
+        photoRenderer.setSize(window.innerWidth, window.innerHeight);
+    }
 }
 
 function render(timestamp, frame) {
@@ -274,7 +262,6 @@ function render(timestamp, frame) {
             session.addEventListener('end', () => {
                 hitTestSourceRequested = false;
                 hitTestSource = null;
-                // 離開 AR 模式時，重置 UI
                 document.getElementById('setup-ui').classList.remove('hidden');
                 document.getElementById('ar-ui').classList.add('hidden');
                 document.getElementById('post-ar-ui').classList.add('hidden');
@@ -293,7 +280,6 @@ function render(timestamp, frame) {
             }
         }
 
-        // 讓所有放置的看板隨時轉向攝影機 (Y 軸對齊)
         placedBillboards.forEach(bb => {
             bb.lookAt(camera.position.x, bb.position.y, camera.position.z);
         });
@@ -301,67 +287,28 @@ function render(timestamp, frame) {
     renderer.render(scene, camera);
 }
 
-// ------------------------------------------------------------------
-// 4. 浮水印與存檔邏輯 (雙重存檔的合成解法 MVP)
-// ------------------------------------------------------------------
 function takeScreenshot() {
-    // 注意：在 WebXR 模式下，renderer.domElement.toDataURL 只會截取 3D 內容 (因背後相機層屬各 OS 系統控制)
-    // 若為原生結合 WebView 可取完整畫面。本 Demo 合成浮水印於 3D 透明層上供測試。
-
     const canvas = document.createElement('canvas');
     canvas.width = window.innerWidth * window.devicePixelRatio;
     canvas.height = window.innerHeight * window.devicePixelRatio;
     const ctx = canvas.getContext('2d');
-
-    // 1. 畫上 3D 模型圖層
     ctx.drawImage(renderer.domElement, 0, 0, canvas.width, canvas.height);
 
-    // 2. 疊加浮水印背景與文字
-    const padding = 20;
-    ctx.font = '32px sans-serif'; // 依據設備像素比放大字體
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
-
-    const now = new Date().toLocaleString();
-    const line1 = `站點: ${siteName}`;
-    const line2 = `GPS: ${gpsData.lat}, ${gpsData.lng}`;
-    const line3 = `${now}`;
-
-    // 為了字體清楚，畫黑色半透明底框
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    const boxWidth = 500;
-    const boxHeight = 120;
-    ctx.fillRect(canvas.width - boxWidth - padding, canvas.height - boxHeight - padding, boxWidth, boxHeight);
-
-    // 寫字
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(line1, canvas.width - padding - 10, canvas.height - padding - 80);
-    ctx.fillText(line2, canvas.width - padding - 10, canvas.height - padding - 45);
-    ctx.fillText(line3, canvas.width - padding - 10, canvas.height - padding - 10);
-
-    // 3. 輸出並觸發下載
-    const dataURL = canvas.toDataURL('image/png');
-    const a = document.createElement('a');
-    a.href = dataURL;
-    a.download = `場勘_${siteName}_${Date.now()}.png`;
-    a.click();
-
-    // 顯示拍攝完成對話框
-    document.getElementById('post-ar-ui').classList.remove('hidden');
+    // 浮水印邏輯同下略... (此處為 AR 截圖)
+    finishAndDownload(canvas, `AR場勘_${siteName}`);
 }
 
-// ==================================================================
-// 5. 匯入照片合成模式 (Offline AR)
-// ==================================================================
+// 離線合成模式
 let photoScene, photoCamera, photoRenderer;
-let photoTargets = []; // 存放照片模式下的機台
+let photoTargets = [];
 let isDragging = false;
 let previousMousePosition = { x: 0, y: 0 };
 let initialPinchDistance = null;
-let initialScale = { x: 1, y: 1, z: 1 };
+let initialPinchAngle = null;
+let initialScales = [];
+let initialRotations = [];
 
 function startPhotoARMode(imageSrc) {
-    // 隱藏選單
     document.getElementById('setup-ui').classList.add('hidden');
     document.getElementById('photo-ar-ui').classList.remove('hidden');
 
@@ -375,46 +322,43 @@ function startPhotoARMode(imageSrc) {
 
     photoScene = new THREE.Scene();
 
-    // 載入背景照片
+    // 改用 Plane 作為背景，避免 iOS background 渲染問題
     const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
     loader.load(imageSrc, (texture) => {
         texture.colorSpace = THREE.SRGBColorSpace;
-        photoScene.background = texture;
+        // 建立一個跟攝影機視角一樣大的平面放在遠處
+        const aspect = texture.image.width / texture.image.height;
+        const bgGeo = new THREE.PlaneGeometry(10 * aspect, 10);
+        const bgMat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, depthWrite: false });
+        const bgMesh = new THREE.Mesh(bgGeo, bgMat);
+        bgMesh.position.z = -1; // 放在物體後面
+        photoScene.add(bgMesh);
     });
 
-    photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
-    photoCamera.position.z = 5;
+    // 調整相機 FOV 讓背景平面充滿畫面
+    photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
+    photoCamera.position.z = 8; // 拉遠相機
 
-    const light = new THREE.AmbientLight(0xffffff, 1.5); // 環境光
+    const light = new THREE.AmbientLight(0xffffff, 2.0);
     photoScene.add(light);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 2);
-    dirLight.position.set(1, 1, 1);
-    photoScene.add(dirLight);
 
     photoRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     photoRenderer.setPixelRatio(window.devicePixelRatio);
     photoRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(photoRenderer.domElement);
 
-    // 實例化所有選取的看板，並列排開
     photoTargets = [];
     selectedModels.forEach((modelDef, index) => {
         const billboard = createBillboard(modelDef);
-        // 並列分散位置
-        billboard.position.set((index - (selectedModels.length - 1) / 2) * 1.5, -1, 0);
+        billboard.position.set((index - (selectedModels.length - 1) / 2) * 2, -2, 1);
         photoScene.add(billboard);
         photoTargets.push(billboard);
     });
 
-    // 綁定手勢事件 (操作第一台或是全部連動)
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
     photoRenderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
-    photoRenderer.domElement.addEventListener('touchend', onTouchEnd, { passive: false });
-
-    // 針對桌面測試綁定滑鼠
-    photoRenderer.domElement.addEventListener('mousedown', (e) => onTouchStart({ touches: [e] }));
-    photoRenderer.domElement.addEventListener('mousemove', (e) => onTouchMove({ touches: [e], preventDefault: () => { } }));
-    photoRenderer.domElement.addEventListener('mouseup', onTouchEnd);
+    photoRenderer.domElement.addEventListener('touchend', onTouchEnd);
 
     photoRenderer.setAnimationLoop(() => {
         photoRenderer.render(photoScene, photoCamera);
@@ -431,90 +375,91 @@ function onTouchStart(e) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
-        // 以選取到的第一台作為縮放基準
-        initialScale = { ...photoTargets[0].scale };
+        initialPinchAngle = Math.atan2(dy, dx);
+        initialScales = photoTargets.map(t => t.scale.x);
+        initialRotations = photoTargets.map(t => t.rotation.y);
     }
 }
 
 function onTouchMove(e) {
-    if (e.preventDefault) e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     if (photoTargets.length === 0) return;
 
     if (isDragging && e.touches.length === 1) {
         const deltaX = e.touches[0].clientX - previousMousePosition.x;
         const deltaY = e.touches[0].clientY - previousMousePosition.y;
-
-        // 移動所有並列機台
         photoTargets.forEach(target => {
-            target.position.x += deltaX * 0.01;
-            target.position.y -= deltaY * 0.01;
+            target.position.x += deltaX * 0.015;
+            target.position.y -= deltaY * 0.015;
         });
-
         previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2 && initialPinchDistance) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const distance = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
 
         const pinchScale = distance / initialPinchDistance;
-        photoTargets.forEach(target => {
-            target.scale.set(
-                initialScale.x * pinchScale,
-                initialScale.y * pinchScale,
-                initialScale.z * pinchScale
-            );
+        const rotateDiff = angle - initialPinchAngle;
+
+        photoTargets.forEach((target, i) => {
+            const s = initialScales[i] * pinchScale;
+            target.scale.set(s, s, s);
+            target.rotation.y = initialRotations[i] - rotateDiff; // 旋轉效果
         });
     }
 }
 
-function onTouchEnd(e) {
+function onTouchEnd() {
     isDragging = false;
     initialPinchDistance = null;
+    initialPinchAngle = null;
 }
 
 function takePhotoScreenshot() {
     if (!photoRenderer) return;
-
+    // 強制渲染一次確保 preserveDrawingBuffer 有內容
+    photoRenderer.render(photoScene, photoCamera);
     const canvas = document.createElement('canvas');
-    canvas.width = window.innerWidth * window.devicePixelRatio;
-    canvas.height = window.innerHeight * window.devicePixelRatio;
+    canvas.width = photoRenderer.domElement.width;
+    canvas.height = photoRenderer.domElement.height;
     const ctx = canvas.getContext('2d');
+    ctx.drawImage(photoRenderer.domElement, 0, 0);
+    finishAndDownload(canvas, `合成場勘_${siteName}`);
+}
 
-    ctx.drawImage(photoRenderer.domElement, 0, 0, canvas.width, canvas.height);
-
-    // 疊加浮水印
+function finishAndDownload(canvas, fileNamePrefix) {
+    const ctx = canvas.getContext('2d');
     const padding = 20 * window.devicePixelRatio;
-    ctx.font = `${24 * window.devicePixelRatio}px sans-serif`;
+    ctx.font = `${26 * window.devicePixelRatio}px sans-serif`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
 
     const now = new Date().toLocaleString();
-    const line1 = `站點: ${siteName}`;
-    const line2 = `GPS: ${gpsData.lat}, ${gpsData.lng}`;
-    const line3 = `${now}`;
+    const lines = [`站點: ${siteName}`, `GPS: ${gpsData.lat}, ${gpsData.lng}`, now];
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    const boxWidth = 400 * window.devicePixelRatio;
-    const boxHeight = 120 * window.devicePixelRatio;
-    ctx.fillRect(canvas.width - boxWidth - padding, canvas.height - boxHeight - padding, boxWidth, boxHeight);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    const boxW = 420 * window.devicePixelRatio, boxH = 130 * window.devicePixelRatio;
+    ctx.fillRect(canvas.width - boxW - padding, canvas.height - boxH - padding, boxW, boxH);
 
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(line1, canvas.width - padding - 10, canvas.height - padding - 80 * window.devicePixelRatio);
-    ctx.fillText(line2, canvas.width - padding - 10, canvas.height - padding - 45 * window.devicePixelRatio);
-    ctx.fillText(line3, canvas.width - padding - 10, canvas.height - padding - 10);
+    lines.reverse().forEach((text, i) => {
+        ctx.fillText(text, canvas.width - padding - 15, canvas.height - padding - 15 - (i * 35 * window.devicePixelRatio));
+    });
 
     const dataURL = canvas.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = dataURL;
-    a.download = `合成場勘_${siteName}_${Date.now()}.png`;
+    a.download = `${fileNamePrefix}_${Date.now()}.png`;
     a.click();
 
-    // 清理與返回
     document.getElementById('post-ar-ui').classList.remove('hidden');
     document.getElementById('photo-ar-ui').classList.add('hidden');
     const container = document.getElementById('photo-ar-container');
     if (container) {
         container.remove();
         photoRenderer.setAnimationLoop(null);
+        photoRenderer = null;
     }
 }
+
