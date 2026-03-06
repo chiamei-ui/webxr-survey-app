@@ -61,7 +61,15 @@ function initUI() {
     // 繼續或重新開始
     document.getElementById('btn-continue').addEventListener('click', () => {
         document.getElementById('post-ar-ui').classList.add('hidden');
-        // 回到拍攝介面
+        document.getElementById('setup-ui').classList.remove('hidden');
+
+        // 確保先前的畫布、容器、以及背景影片的殘留都乾淨移除
+        const container = document.getElementById('photo-ar-container');
+        if (container) container.remove();
+        if (photoRenderer) {
+            photoRenderer.setAnimationLoop(null);
+            photoRenderer = null;
+        }
     });
 
     document.getElementById('btn-restart').addEventListener('click', () => {
