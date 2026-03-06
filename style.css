@@ -293,7 +293,7 @@ input[type="text"] {
   height: 100vh;
   object-fit: contain;
   /* 讓作業系統自己搞定不變形縮放與裁切 */
-  z-index: 1;
+  z-index: -1;
   /* 位於 overlay(10) 與 container(5) 之下 */
   pointer-events: none;
 }
