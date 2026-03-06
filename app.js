@@ -61,14 +61,22 @@ function initUI() {
     // 繼續或重新開始
     document.getElementById('btn-continue').addEventListener('click', () => {
         document.getElementById('post-ar-ui').classList.add('hidden');
-        document.getElementById('setup-ui').classList.remove('hidden');
 
-        // 確保先前的畫布、容器、以及背景影片的殘留都乾淨移除
-        const container = document.getElementById('photo-ar-container');
-        if (container) container.remove();
-        if (photoRenderer) {
-            photoRenderer.setAnimationLoop(null);
-            photoRenderer = null;
+        cleanupARSession();
+
+        if (currentARMode === 'live_video') {
+            startLiveVideoMode();
+        } else if (currentARMode === 'photo_import') {
+            document.getElementById('setup-ui').classList.remove('hidden');
+            // 主動觸發匯入圖片
+            const importInput = document.getElementById('image-upload');
+            importInput.classList.remove('hidden');
+            importInput.style.opacity = '0';
+            importInput.style.position = 'absolute';
+            importInput.click();
+            importInput.classList.add('hidden');
+        } else {
+            document.getElementById('setup-ui').classList.remove('hidden');
         }
     });
 
@@ -434,7 +442,8 @@ function takeScreenshot() {
     ctx.drawImage(renderer.domElement, 0, 0, canvas.width, canvas.height);
 
     // 浮水印邏輯同下略... (此處為 AR 截圖)
-    finishAndDownload(canvas, `AR場勘_${siteName}`);
+    const contentRect = { x: 0, y: 0, w: canvas.width, h: canvas.height };
+    finishAndDownload(canvas, contentRect, `AR場勘_${siteName}`);
 }
 
 // 離線合成模式 / WebRTC 即時相機模式
@@ -449,6 +458,40 @@ let initialPinchAngle = null;
 let initialScale = null;
 let initialRotation = null;
 let interactionMode = 'move'; // 'move', 'rotate'
+let currentARMode = null; // 'live_video', 'photo_import', 'webxr'
+
+function cleanupARSession() {
+    // 關閉時清除背景，釋放記憶體
+    const bgImg = document.getElementById("native-photo-bg");
+    if (bgImg) {
+        bgImg.src = "";
+        bgImg.classList.add('hidden');
+    }
+
+    document.getElementById('photo-ar-ui').classList.add('hidden');
+    document.getElementById('ar-ui').classList.add('hidden');
+
+    const container = document.getElementById('photo-ar-container');
+    if (container) {
+        container.remove();
+    }
+    if (photoRenderer) {
+        photoRenderer.setAnimationLoop(null);
+        photoRenderer = null;
+    }
+
+    // 關閉相機串流
+    if (localVideoStream) {
+        localVideoStream.getTracks().forEach(track => track.stop());
+        localVideoStream = null;
+    }
+    if (liveVideoElement) {
+        liveVideoElement.remove();
+        liveVideoElement = null;
+    }
+
+    photoGroup = null;
+}
 
 function startCommonARMode() {
     document.getElementById('setup-ui').classList.add('hidden');
@@ -556,6 +599,7 @@ function startCommonARMode() {
 }
 
 function startPhotoARMode(imageSrc) {
+    currentARMode = 'photo_import';
     startCommonARMode();
     // 使用原生的 HTML <img> 標籤處理照片，徹底解決所有廠牌的 EXIF 與截切問題
     const bgImg = document.getElementById('native-photo-bg');
@@ -564,6 +608,7 @@ function startPhotoARMode(imageSrc) {
 }
 
 function startLiveVideoMode() {
+    currentARMode = 'live_video';
     startCommonARMode();
     // 建立影像元素作為背景
     liveVideoElement = document.createElement('video');
@@ -821,29 +866,8 @@ function finishAndDownload(canvas, contentRect, fileNamePrefix) {
     a.download = `${fileNamePrefix}_${Date.now()}.png`;
     a.click();
 
-    // 關閉時清除背景，釋放記憶體
-    const bgImg = document.getElementById("native-photo-bg");
-    if (bgImg) {
-        bgImg.src = "";
-        bgImg.classList.add('hidden');
-    }
-
+    // 截圖後顯示完成面板，將控制列與 UI 隱藏，不銷毀場景以保留背景
     document.getElementById('post-ar-ui').classList.remove('hidden');
     document.getElementById('photo-ar-ui').classList.add('hidden');
-    const container = document.getElementById('photo-ar-container');
-    if (container) {
-        container.remove();
-        photoRenderer.setAnimationLoop(null);
-        photoRenderer = null;
-    }
-
-    // 關閉相機串流
-    if (localVideoStream) {
-        localVideoStream.getTracks().forEach(track => track.stop());
-        localVideoStream = null;
-    }
-    if (liveVideoElement) {
-        liveVideoElement.remove();
-        liveVideoElement = null;
-    }
+    document.getElementById('ar-ui').classList.add('hidden');
 }
