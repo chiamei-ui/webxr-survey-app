@@ -60,23 +60,14 @@ function initUI() {
 
     // 繼續或重新開始
     document.getElementById('btn-continue').addEventListener('click', () => {
+        // 隱藏完成面板
         document.getElementById('post-ar-ui').classList.add('hidden');
 
-        cleanupARSession();
-
-        if (currentARMode === 'live_video') {
-            startLiveVideoMode();
-        } else if (currentARMode === 'photo_import') {
-            document.getElementById('setup-ui').classList.remove('hidden');
-            // 主動觸發匯入圖片
-            const importInput = document.getElementById('image-upload');
-            importInput.classList.remove('hidden');
-            importInput.style.opacity = '0';
-            importInput.style.position = 'absolute';
-            importInput.click();
-            importInput.classList.add('hidden');
+        // 重新顯示剛剛隱藏起來的拍照與編輯控制項與操作層，完全不銷毀畫布與照片
+        if (currentARMode === 'photo_import' || currentARMode === 'live_video') {
+            document.getElementById('photo-ar-ui').classList.remove('hidden');
         } else {
-            document.getElementById('setup-ui').classList.remove('hidden');
+            document.getElementById('ar-ui').classList.remove('hidden');
         }
     });
 
