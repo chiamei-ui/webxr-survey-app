@@ -542,11 +542,21 @@ function startPhotoARMode(imageSrc) {
         const aspect = texture.image.width / texture.image.height;
         const screenAspect = window.innerWidth / window.innerHeight;
 
+        // 計算距離 13 (相機 Z=8, 面板 Z=-5) 上真實的相機視錐高度與寬度
+        const vFov = photoCamera.fov * Math.PI / 180;
+        const distance = Math.abs(photoCamera.position.z - (-5));
+        const viewHeight = 2 * Math.tan(vFov / 2) * distance;
+        const viewWidth = viewHeight * screenAspect;
+
         let geoW, geoH;
         if (aspect > screenAspect) {
-            geoH = 15; geoW = 15 * aspect;
+            // 圖片比較寬，上下留黑邊 (對齊寬度)
+            geoW = viewWidth;
+            geoH = viewWidth / aspect;
         } else {
-            geoW = 15 * screenAspect; geoH = geoW / aspect;
+            // 圖片比較窄，左右留黑邊 (對齊高度)
+            geoH = viewHeight;
+            geoW = viewHeight * aspect;
         }
 
         const bgGeo = new THREE.PlaneGeometry(geoW, geoH);
@@ -747,45 +757,35 @@ function takePhotoScreenshot() {
 
             let drawW, drawH, drawX, drawY;
             if (imgRatio > canvasRatio) {
-                // 圖片較寬，上下有黑邊
-                drawH = canvas.height;
-                drawW = canvas.height * imgRatio;
-                drawX = (canvas.width - drawW) / 2;
-                drawY = 0;
-                contentRect = { x: drawX, y: 0, w: drawW, h: canvas.height };
-            } else {
-                // 畫布較寬，左右有黑邊
+                // 圖片較寬，上下有黑邊 (對齊寬度)
                 drawW = canvas.width;
                 drawH = canvas.width / imgRatio;
                 drawX = 0;
                 drawY = (canvas.height - drawH) / 2;
                 contentRect = { x: 0, y: drawY, w: canvas.width, h: drawH };
+            } else {
+                // 畫布較寬，左右有黑邊 (對齊高度)
+                drawH = canvas.height;
+                drawW = canvas.height * imgRatio;
+                drawX = (canvas.width - drawW) / 2;
+                drawY = 0;
+                contentRect = { x: drawX, y: 0, w: drawW, h: canvas.height };
             }
         }
     }
 
     ctx.drawImage(photoRenderer.domElement, 0, 0);
 
-    // 判斷當下機台的旋轉角度，反推最終照片的補全旋轉度
-    // photoGroup.rotation.z 如果是負的(機台順時針)，代表照片必須逆時針(也就是旋轉回正)
-    let imageRotationAngle = 0;
-    if (photoGroup) {
-        // 利用機台的 Z 軸旋轉度，捕捉 90 度 (-Math.PI/2 或 Math.PI/2) 並映射給相片
-        const pi2 = Math.PI / 2;
-        const steps = Math.round(photoGroup.rotation.z / pi2);
-        imageRotationAngle = steps * pi2;
-    }
-
-    finishAndDownload(canvas, contentRect, `合成場勘_${siteName}`, imageRotationAngle);
+    finishAndDownload(canvas, contentRect, `合成場勘_${siteName}`);
 }
 
-function finishAndDownload(canvas, contentRect, fileNamePrefix, imageRotationAngle = 0) {
+function finishAndDownload(canvas, contentRect, fileNamePrefix) {
     // 截切圖片 (把黑邊裁掉) 回傳精確的實際合成圖
     let finalCanvas = canvas;
 
-    // 1. 如果影片比例跟螢幕相差太大，我們只匯出真正的影片區域
+    // 1. 如果影片比例跟螢幕相差太大，我們只匯出真正的影像區域
     if (contentRect.w !== canvas.width || contentRect.h !== canvas.height) {
-        // 因可能影片超出邊界 (w/h > canvas) 或在內部 (w/h < canvas)，做個安全裁切：
+        // 因可能超出邊界，做個安全裁切：
         const clipX = Math.max(0, contentRect.x);
         const clipY = Math.max(0, contentRect.y);
         const clipW = Math.min(canvas.width, contentRect.w);
@@ -797,32 +797,7 @@ function finishAndDownload(canvas, contentRect, fileNamePrefix, imageRotationAng
         finalCanvas.getContext('2d').drawImage(canvas, clipX, clipY, clipW, clipH, 0, 0, clipW, clipH);
     }
 
-    // 2. 如果偵測到機台打橫，我們「自動對齊」旋轉照片以符合觀看角度！
-    if (imageRotationAngle !== 0) {
-        const rotatedCanvas = document.createElement('canvas');
-        const steps = Math.round(imageRotationAngle / (Math.PI / 2)) % 4; // 只取 90 度的倍數
-
-        // 當轉了奇數倍的 90 度時，寬高必須互換
-        if (Math.abs(steps) % 2 === 1) {
-            rotatedCanvas.width = finalCanvas.height;
-            rotatedCanvas.height = finalCanvas.width;
-        } else {
-            rotatedCanvas.width = finalCanvas.width;
-            rotatedCanvas.height = finalCanvas.height;
-        }
-
-        const rotCtx = rotatedCanvas.getContext('2d');
-        rotCtx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
-
-        // 這裡將機台轉度「原封不動」賦予給畫布
-        // 當 photoGroup.rotation.z 是 -90 度時，rotCtx.rotate 也是 -90 (Canvas旋轉逆時針)，剛好把被「順時針」騙過去的視覺抵銷，讓機台在相片中變成正立的！
-        rotCtx.rotate(imageRotationAngle);
-
-        rotCtx.drawImage(finalCanvas, -finalCanvas.width / 2, -finalCanvas.height / 2);
-        finalCanvas = rotatedCanvas;
-    }
-
-    // 3. 將浮水印壓印在「最終裁切並可能旋轉過」的照片上
+    // 2. 將浮水印壓印在「最終裁切」後的照片上
     const finalCtx = finalCanvas.getContext('2d');
     const padding = 20 * window.devicePixelRatio;
     const fontSize = 17 * window.devicePixelRatio;
