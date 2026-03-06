@@ -365,6 +365,7 @@ let initialPinchDistance = null;
 let initialPinchAngle = null;
 let initialScale = null;
 let initialRotation = null;
+let interactionMode = 'move'; // 'move' 或 'rotate'
 
 function startCommonARMode() {
     document.getElementById('setup-ui').classList.add('hidden');
@@ -391,13 +392,34 @@ function startCommonARMode() {
     photoRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(photoRenderer.domElement);
 
+    const toggleBtn = document.getElementById('btn-toggle-interaction');
+    interactionMode = 'move';
+    toggleBtn.textContent = '👆 目前操作：移動';
+    toggleBtn.onclick = () => {
+        if (interactionMode === 'move') {
+            interactionMode = 'rotate';
+            toggleBtn.textContent = '🔄 目前操作：旋轉';
+        } else {
+            interactionMode = 'move';
+            toggleBtn.textContent = '👆 目前操作：移動';
+        }
+    };
+
     photoGroup = new THREE.Group();
     photoScene.add(photoGroup);
 
-    selectedModels.forEach((modelDef, index) => {
+    // 計算總寬度與 10cm 間隙
+    let totalWidth = 0;
+    selectedModels.forEach(modelDef => { totalWidth += modelDef.w; });
+    totalWidth += (selectedModels.length - 1) * 0.1; // 加上每台之間 10cm 的間距
+
+    let currentX = -totalWidth / 2;
+    selectedModels.forEach((modelDef) => {
         const machine = createMachine3D(modelDef);
-        machine.position.set((index - (selectedModels.length - 1) / 2) * 1.5, -1, 1);
+        // 設定位置：目前 X 起點加上該機台一半的寬度
+        machine.position.set(currentX + modelDef.w / 2, -1, 1);
         photoGroup.add(machine);
+        currentX += modelDef.w + 0.1; // 累加至下一台的起點
     });
 
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -476,7 +498,7 @@ function onTouchStart(e) {
         initialPinchDistance = Math.sqrt(dx * dx + dy * dy);
         initialPinchAngle = Math.atan2(dy, dx);
         initialScale = photoGroup.scale.x;
-        initialRotation = photoGroup.rotation.y;
+        initialRotation = photoGroup.rotation.z; // 雙指平轉改為 Z 軸 rolling
     }
 }
 
@@ -488,8 +510,13 @@ function onTouchMove(e) {
         const deltaX = e.touches[0].clientX - previousMousePosition.x;
         const deltaY = e.touches[0].clientY - previousMousePosition.y;
 
-        photoGroup.position.x += deltaX * 0.015;
-        photoGroup.position.y -= deltaY * 0.015;
+        if (interactionMode === 'move') {
+            photoGroup.position.x += deltaX * 0.015;
+            photoGroup.position.y -= deltaY * 0.015;
+        } else if (interactionMode === 'rotate') {
+            photoGroup.rotation.y += deltaX * 0.01; // 左右滑動控制 Yaw
+            photoGroup.rotation.x += deltaY * 0.01; // 上下滑動控制 Pitch
+        }
 
         previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2 && initialPinchDistance) {
@@ -503,7 +530,7 @@ function onTouchMove(e) {
 
         const s = initialScale * pinchScale;
         photoGroup.scale.set(s, s, s);
-        photoGroup.rotation.y = initialRotation - rotateDiff;
+        photoGroup.rotation.z = initialRotation - rotateDiff; // 雙指控制畫面平面的旋轉 (Roll)
     }
 }
 
@@ -548,21 +575,29 @@ function takePhotoScreenshot() {
 function finishAndDownload(canvas, fileNamePrefix) {
     const ctx = canvas.getContext('2d');
     const padding = 20 * window.devicePixelRatio;
-    ctx.font = `bold ${26 * window.devicePixelRatio}px sans-serif`;
+
+    // 浮水印字體縮小三分之一 (原為 26 -> 現為 17)
+    const fontSize = 17 * window.devicePixelRatio;
+    ctx.font = `bold ${fontSize}px sans-serif`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
 
     const now = new Date().toLocaleString();
     const lines = [`站點: ${siteName}`, `GPS: ${gpsData.lat}, ${gpsData.lng}`, now];
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    const boxW = 450 * window.devicePixelRatio, boxH = 140 * window.devicePixelRatio;
-    ctx.fillRect(canvas.width - boxW - padding, canvas.height - boxH - padding, boxW, boxH);
-
+    // 白字加陰影設定，移除黑色矩形底色
+    ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+    ctx.shadowBlur = 4 * window.devicePixelRatio;
+    ctx.shadowOffsetX = 1 * window.devicePixelRatio;
+    ctx.shadowOffsetY = 1 * window.devicePixelRatio;
     ctx.fillStyle = '#ffffff';
+
     lines.reverse().forEach((text, i) => {
-        ctx.fillText(text, canvas.width - padding - 15, canvas.height - padding - 20 - (i * 38 * window.devicePixelRatio));
+        ctx.fillText(text, canvas.width - padding - 10, canvas.height - padding - 15 - (i * (fontSize + 6 * window.devicePixelRatio)));
     });
+
+    // 恢復畫布陰影屬性以免影響其他繪製 (本例是最後一部無妨，但保持好習慣)
+    ctx.shadowColor = "transparent";
 
     const dataURL = canvas.toDataURL('image/png');
     const a = document.createElement('a');
