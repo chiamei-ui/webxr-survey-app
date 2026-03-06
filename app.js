@@ -206,7 +206,8 @@ function initThree() {
             color: cb.dataset.color || '#888888', // 取出主題色
             img: cb.dataset.img,
             imgL: cb.dataset.imgL || null,
-            imgR: cb.dataset.imgR || null
+            imgR: cb.dataset.imgR || null,
+            imgB: cb.dataset.imgB || null
         }));
         document.getElementById('setup-ui').classList.add('hidden');
         document.getElementById('ar-ui').classList.remove('hidden');
@@ -244,7 +245,7 @@ function createMachine3D(modelDef) {
         { key: null, color: themeColor },        // 上 (套用主題色)
         { key: null, color: themeColor },        // 下 (套用主題色)
         { key: 'img', fallback: modelDef.img },  // 正
-        { key: null, color: themeColor }         // 背 (套用主題色)
+        { key: 'imgB', color: themeColor }       // 背 (如果有 imgB 則用，否則用主題色)
     ];
 
     faceConfigs.forEach((config) => {

@@ -54,7 +54,8 @@
     <script type="importmap">
         {
           "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
           }
         }
     </script>
@@ -74,8 +75,9 @@
 
     <script type="module">
         import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        let scene, camera, renderer, currentMesh;
+        let scene, camera, renderer, currentMesh, controls;
         let models = [];
         let currentIndex = 0;
 
@@ -99,6 +101,11 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
             scene.add(ambientLight);
 
+            // 加入軌道控制器，讓使用者可用滑鼠旋轉視角
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // 增加拖拉彈性
+            controls.dampingFactor = 0.05;
+
             window.addEventListener('resize', onWindowResize);
             document.getElementById('prev').onclick = () => showModel(currentIndex - 1);
             document.getElementById('next').onclick = () => showModel(currentIndex + 1);
@@ -111,9 +118,9 @@
                 { name: "Ai4-免換袋 1.8", w: 1.803, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/ai4_1.8/front.png", imgL: "./assets/models/ai4_1.8/left.png", imgR: "./assets/models/ai4_1.8/right.png" },
                 { name: "Ai4-免換袋 2.1", w: 2.083, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/ai4_2.1/front.png", imgL: "./assets/models/ai4_2.1/left.png", imgR: "./assets/models/ai4_2.1/right.png" },
                 { name: "Ai4-免換袋 2.7", w: 2.683, h: 2.2, d: 1.18, color: "#F8C700", img: "./assets/models/ai4_2.7/front.png", imgL: "./assets/models/ai4_2.7/left.png", imgR: "./assets/models/ai4_2.7/right.png" },
-                { name: "Ai4-全聯免換袋 1.8", w: 1.803, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/px_ai4_1.8/front.png" },
-                { name: "Ai4-全聯免換袋 2.1", w: 2.083, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/px_ai4_2.1/front.png", imgL: "./assets/models/px_ai4_2.1/left.png", imgR: "./assets/models/px_ai4_2.1/right.png" },
-                { name: "Ai4-全聯免換袋 2.7", w: 2.683, h: 2.2, d: 1.18, color: "#F8C700", img: "./assets/models/px_ai4_2.7/front.png", imgR: "./assets/models/px_ai4_2.7/right.png" },
+                { name: "Ai4-全聯免換袋 1.8", w: 1.803, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/px_ai4_1.8/front.png", imgL: "./assets/models/px_ai4_1.8/left.png", imgR: "./assets/models/px_ai4_1.8/right.png", imgB: "./assets/models/px_ai4_1.8/back.png" },
+                { name: "Ai4-全聯免換袋 2.1", w: 2.083, h: 2.2, d: 1.129, color: "#F8C700", img: "./assets/models/px_ai4_2.1/front.png", imgL: "./assets/models/px_ai4_2.1/left.png", imgR: "./assets/models/px_ai4_2.1/right.png", imgB: "./assets/models/px_ai4_2.1/back.png" },
+                { name: "Ai4-全聯免換袋 2.7", w: 2.683, h: 2.2, d: 1.18, color: "#F8C700", img: "./assets/models/px_ai4_2.7/front.png", imgL: "./assets/models/px_ai4_2.7/left.png", imgR: "./assets/models/px_ai4_2.7/right.png", imgB: "./assets/models/px_ai4_2.7/back.png" },
                 { name: "Ai4-標準單機+瓶蓋箱", w: 1.115, h: 1.9, d: 0.93, color: "#EA5106", img: "./assets/models/ai4_cap/front.png" },
                 { name: "Ai4-全聯單機+瓶蓋箱", w: 1.115, h: 1.9, d: 0.93, color: "#F8C700", img: "./assets/models/px_ai4_cap/front.png", imgL: "./assets/models/px_ai4_cap/left.png", imgR: "./assets/models/px_ai4_cap/right.png" },
                 { name: "台塑-洗寶", w: 0.85, h: 1.8, d: 0.67, color: "#CCE0ED", img: "./assets/models/formosa_v1/front.png", imgL: "./assets/models/formosa_v1/left.png" },
@@ -206,9 +213,8 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            if (currentMesh) {
-                currentMesh.rotation.y += 0.005;
-            }
+            // 若有開啟 damping，必須在迴圈內 update
+            if (controls) controls.update();
             renderer.render(scene, camera);
         }
     </script>
