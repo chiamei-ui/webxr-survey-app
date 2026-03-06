@@ -301,6 +301,18 @@ function onWindowResize() {
         photoCamera.aspect = window.innerWidth / window.innerHeight;
         photoCamera.updateProjectionMatrix();
         photoRenderer.setSize(window.innerWidth, window.innerHeight);
+
+        // 即時檢查當下方向並翻轉機台
+        if (photoGroup) {
+            const isLandscape = window.innerWidth > window.innerHeight;
+            if (isLandscape) {
+                photoGroup.rotation.z = Math.PI / 2;
+                initialRotation = Math.PI / 2;
+            } else {
+                photoGroup.rotation.z = 0;
+                initialRotation = 0;
+            }
+        }
     }
 }
 
@@ -408,12 +420,13 @@ function startCommonARMode() {
     photoGroup = new THREE.Group();
     photoScene.add(photoGroup);
 
-    // 判斷當前螢幕是否為橫式 (寬 > 高)，若是橫式，自動將機台群組逆時針轉換 90 度 (從直立轉平)
+    // 初始判斷當前螢幕是否為橫式 (寬 > 高)
     const isLandscape = window.innerWidth > window.innerHeight;
     if (isLandscape) {
         photoGroup.rotation.z = Math.PI / 2;
         initialRotation = Math.PI / 2;
     } else {
+        photoGroup.rotation.z = 0;
         initialRotation = 0;
     }
 
@@ -486,7 +499,27 @@ function startLiveVideoMode() {
         .then(stream => {
             localVideoStream = stream;
             liveVideoElement.srcObject = stream;
-            liveVideoElement.play().catch(e => console.warn(e));
+
+            // 當相機畫面準備好時，進行更精確的旋轉判定
+            liveVideoElement.onloadedmetadata = () => {
+                liveVideoElement.play().catch(e => console.warn(e));
+
+                if (photoGroup) {
+                    // 以相機回傳的實際影像比例來決定是否橫向
+                    const cameraIsLandscape = liveVideoElement.videoWidth > liveVideoElement.videoHeight;
+                    // 以視窗比例來決定是否橫向
+                    const windowIsLandscape = window.innerWidth > window.innerHeight;
+
+                    // 若相機傳來的是橫的，或視窗是橫的，我們都嘗試將機台打橫
+                    if (cameraIsLandscape || windowIsLandscape) {
+                        photoGroup.rotation.z = Math.PI / 2;
+                        initialRotation = Math.PI / 2;
+                    } else {
+                        photoGroup.rotation.z = 0;
+                        initialRotation = 0;
+                    }
+                }
+            };
         })
         .catch(err => {
             alert("相機授權失敗或不支援，請改用「從相簿匯入舊照」模式。(" + err.message + ")");
