@@ -256,6 +256,12 @@ input[type="text"] {
   /* 確保高於浮水印與其他全螢幕元件 */
 }
 
+.tool-row {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
 .tool-btn {
   background-color: rgba(0, 123, 255, 0.9);
   color: white;
@@ -269,6 +275,16 @@ input[type="text"] {
   cursor: pointer;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
   /* 增加陰影提升辨識度 */
+}
+
+.tool-btn.half {
+  flex: 1;
+  padding: 12px 5px;
+  font-size: 1rem;
+}
+
+.tool-btn.secondary {
+  background-color: rgba(108, 117, 125, 0.9);
 }
 
 .tool-btn:active {
@@ -286,14 +302,14 @@ input[type="text"] {
 }
 
 #native-photo-bg {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
   object-fit: contain;
   /* 讓作業系統自己搞定不變形縮放與裁切 */
-  z-index: -1;
-  /* 位於 overlay(10) 與 container(5) 之下 */
+  z-index: 1;
+  /* 位於黑底之上，canvas(5) 之下 */
   pointer-events: none;
 }

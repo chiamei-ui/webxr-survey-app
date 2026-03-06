@@ -146,8 +146,6 @@
 
   <!-- 第 2-B 層: 舊照合成 UI (新功能) -->
   <div id="photo-ar-ui" class="overlay hidden">
-    <!-- 原生 HTML 相片背景 -->
-    <img id="native-photo-bg" crossorigin="anonymous" class="hidden">
 
     <!-- 這裡會用 Three.js 在背後繪製圖片與機台 -->
     <div id="photo-watermark-preview" class="watermark-overlay">
@@ -157,12 +155,17 @@
     </div>
 
     <!-- 右上角工具列疊加層 -->
-    <div class="top-right-tools">
-      <button id="btn-toggle-interaction" class="tool-btn">👆 移動機台</button>
-      <button id="btn-scale-up" class="tool-btn">➕ 放大機台</button>
-      <button id="btn-scale-down" class="tool-btn">➖ 縮小機台</button>
+    <div class="top-right-tools" id="photo-tools-panel">
+      <button id="btn-mode-move" class="tool-btn highlight">👆 移動機台</button>
+      <button id="btn-mode-rotate" class="tool-btn">🔄 旋轉機台</button>
+
+      <div class="tool-row">
+        <button id="btn-scale-up" class="tool-btn half">➕ 放大</button>
+        <button id="btn-scale-down" class="tool-btn half">➖ 縮小</button>
+      </div>
+
       <button id="btn-force-rotate" class="tool-btn">⤻ 轉90度</button>
-      <button id="btn-ruler-align" class="tool-btn highlight">📏 對齊捲尺</button>
+      <button id="btn-reset-machine" class="tool-btn secondary">🔙 重整機台</button>
     </div>
 
     <div class="bottom-bar">
@@ -202,6 +205,8 @@
       <button id="btn-upload" class="action-btn upload">上傳至 Kintone (Demo)</button>
     </div>
   </div>
+  <!-- 原生 HTML 圖片畫布 (永遠放在最底層) -->
+  <img id="native-photo-bg" crossorigin="anonymous" class="hidden">
 
   <script type="module" src="app.js"></script>
 </body>

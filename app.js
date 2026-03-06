@@ -440,10 +440,7 @@ let initialPinchDistance = null;
 let initialPinchAngle = null;
 let initialScale = null;
 let initialRotation = null;
-let interactionMode = 'move'; // 'move', 'rotate', 'ruler'
-let currentMachineTotalWidth = 0; // 用於捲尺對齊計算
-let rulerStartPos = null;
-let rulerLineEl = null;
+let interactionMode = 'move'; // 'move', 'rotate'
 
 function startCommonARMode() {
     document.getElementById('setup-ui').classList.add('hidden');
@@ -470,38 +467,20 @@ function startCommonARMode() {
     photoRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(photoRenderer.domElement);
 
-    const toggleBtn = document.getElementById('btn-toggle-interaction');
-    const rulerBtn = document.getElementById('btn-ruler-align');
+    const btnMove = document.getElementById('btn-mode-move');
+    const btnRotate = document.getElementById('btn-mode-rotate');
     interactionMode = 'move';
-    toggleBtn.textContent = '👆 移動機台';
 
-    function resetModes() {
-        toggleBtn.classList.remove('highlight');
-        rulerBtn.classList.remove('highlight');
-    }
-
-    toggleBtn.onclick = () => {
-        resetModes();
-        if (interactionMode === 'move' || interactionMode === 'ruler') {
-            interactionMode = 'rotate';
-            toggleBtn.textContent = '🔄 旋轉機台';
-            toggleBtn.classList.add('highlight'); // 假如有樣式可用
-        } else {
-            interactionMode = 'move';
-            toggleBtn.textContent = '👆 移動機台';
-        }
+    btnMove.onclick = () => {
+        btnRotate.classList.remove('highlight');
+        btnMove.classList.add('highlight');
+        interactionMode = 'move';
     };
 
-    rulerBtn.onclick = () => {
-        resetModes();
-        if (interactionMode === 'ruler') {
-            interactionMode = 'move';
-            toggleBtn.textContent = '👆 移動機台';
-        } else {
-            interactionMode = 'ruler';
-            rulerBtn.classList.add('highlight');
-            toggleBtn.textContent = '👆 移動機台'; // 恢復文字避免混淆
-        }
+    btnRotate.onclick = () => {
+        btnMove.classList.remove('highlight');
+        btnRotate.classList.add('highlight');
+        interactionMode = 'rotate';
     };
 
     document.getElementById('btn-scale-up').onclick = () => { if (photoGroup) photoGroup.scale.multiplyScalar(1.1); };
@@ -516,19 +495,14 @@ function startCommonARMode() {
         }
     };
 
-    // 建立一把用於視覺反饋的紅線
-    if (!rulerLineEl) {
-        rulerLineEl = document.createElement('div');
-        rulerLineEl.style.position = 'absolute';
-        rulerLineEl.style.height = '4px';
-        rulerLineEl.style.backgroundColor = '#ff3333';
-        rulerLineEl.style.transformOrigin = 'left center';
-        rulerLineEl.style.zIndex = '50';
-        rulerLineEl.style.pointerEvents = 'none';
-        rulerLineEl.style.display = 'none';
-        rulerLineEl.style.boxShadow = '0 0 5px white';
-        document.getElementById('photo-ar-ui').appendChild(rulerLineEl);
-    }
+    // 一鍵還原到預設狀態
+    document.getElementById('btn-reset-machine').onclick = () => {
+        if (photoGroup) {
+            photoGroup.position.set(0, 0, 0);
+            photoGroup.rotation.set(0, 0, initialRotation);
+            photoGroup.scale.set(1, 1, 1);
+        }
+    };
 
     photoGroup = new THREE.Group();
     photoScene.add(photoGroup);
@@ -547,7 +521,6 @@ function startCommonARMode() {
     let totalWidth = 0;
     selectedModels.forEach(modelDef => { totalWidth += modelDef.w; });
     totalWidth += (selectedModels.length - 1) * 0.1; // 加上每台之間 10cm 的間距
-    currentMachineTotalWidth = totalWidth; // 記錄下來供捲尺計算使用
 
     let currentX = -totalWidth / 2;
     selectedModels.forEach((modelDef) => {
@@ -634,16 +607,8 @@ function onTouchStart(e) {
     if (!photoGroup) return;
 
     if (e.touches.length === 1) {
-        if (interactionMode === 'ruler') {
-            rulerStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            rulerLineEl.style.display = 'block';
-            rulerLineEl.style.left = `${rulerStartPos.x}px`;
-            rulerLineEl.style.top = `${rulerStartPos.y}px`;
-            rulerLineEl.style.width = '0px';
-        } else {
-            isDragging = true;
-            previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        }
+        isDragging = true;
+        previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2) {
         isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -659,16 +624,7 @@ function onTouchMove(e) {
     if (e.cancelable) e.preventDefault();
     if (!photoGroup) return;
 
-    if (interactionMode === 'ruler' && rulerStartPos && e.touches.length === 1) {
-        const currentX = e.touches[0].clientX;
-        const currentY = e.touches[0].clientY;
-        const dx = currentX - rulerStartPos.x;
-        const dy = currentY - rulerStartPos.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx);
-        rulerLineEl.style.width = `${distance}px`;
-        rulerLineEl.style.transform = `rotate(${angle}rad)`;
-    } else if (isDragging && e.touches.length === 1 && interactionMode !== 'ruler') {
+    if (isDragging && e.touches.length === 1) {
         const deltaX = e.touches[0].clientX - previousMousePosition.x;
         const deltaY = e.touches[0].clientY - previousMousePosition.y;
 
@@ -697,20 +653,6 @@ function onTouchMove(e) {
 }
 
 function onTouchEnd(e) {
-    if (interactionMode === 'ruler' && rulerStartPos) {
-        // 放開時，進行捲尺對齊與等比例放大縮小運算
-        if (e.changedTouches && e.changedTouches.length > 0) {
-            handleRulerAlignment(rulerStartPos.x, rulerStartPos.y, e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-        }
-        rulerStartPos = null;
-        rulerLineEl.style.display = 'none';
-
-        // 切回移動模式
-        interactionMode = 'move';
-        document.getElementById('btn-ruler-align').classList.remove('highlight');
-        document.getElementById('btn-toggle-interaction').textContent = '👆 移動機台';
-    }
-
     isDragging = false;
     initialPinchDistance = null;
     initialPinchAngle = null;
@@ -721,92 +663,29 @@ function onTouchEnd(e) {
 // ----------------------------------------------------
 function onMouseDown(e) {
     if (!photoGroup) return;
-    if (interactionMode === 'ruler') {
-        rulerStartPos = { x: e.clientX, y: e.clientY };
-        rulerLineEl.style.display = 'block';
-        rulerLineEl.style.left = `${rulerStartPos.x}px`;
-        rulerLineEl.style.top = `${rulerStartPos.y}px`;
-        rulerLineEl.style.width = '0px';
-    } else {
-        isDragging = true;
-        previousMousePosition = { x: e.clientX, y: e.clientY };
-    }
+    isDragging = true;
+    previousMousePosition = { x: e.clientX, y: e.clientY };
 }
 
 function onMouseMove(e) {
-    if (!photoGroup) return;
+    if (!photoGroup || !isDragging) return;
 
-    if (interactionMode === 'ruler' && rulerStartPos) {
-        const dx = e.clientX - rulerStartPos.x;
-        const dy = e.clientY - rulerStartPos.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx);
-        rulerLineEl.style.width = `${distance}px`;
-        rulerLineEl.style.transform = `rotate(${angle}rad)`;
-    } else if (isDragging && interactionMode !== 'ruler') {
-        const deltaX = e.clientX - previousMousePosition.x;
-        const deltaY = e.clientY - previousMousePosition.y;
+    const deltaX = e.clientX - previousMousePosition.x;
+    const deltaY = e.clientY - previousMousePosition.y;
 
-        if (interactionMode === 'move') {
-            photoGroup.position.x += deltaX * 0.015;
-            photoGroup.position.y -= deltaY * 0.015;
-        } else if (interactionMode === 'rotate') {
-            photoGroup.rotation.y += deltaX * 0.01;
-            photoGroup.rotation.x += deltaY * 0.01;
-        }
-
-        previousMousePosition = { x: e.clientX, y: e.clientY };
+    if (interactionMode === 'move') {
+        photoGroup.position.x += deltaX * 0.015;
+        photoGroup.position.y -= deltaY * 0.015;
+    } else if (interactionMode === 'rotate') {
+        photoGroup.rotation.y += deltaX * 0.01;
+        photoGroup.rotation.x += deltaY * 0.01;
     }
+
+    previousMousePosition = { x: e.clientX, y: e.clientY };
 }
 
 function onMouseUp(e) {
-    if (interactionMode === 'ruler' && rulerStartPos) {
-        handleRulerAlignment(rulerStartPos.x, rulerStartPos.y, e.clientX, e.clientY);
-        rulerStartPos = null;
-        rulerLineEl.style.display = 'none';
-
-        // 切回移動模式
-        interactionMode = 'move';
-        document.getElementById('btn-ruler-align').classList.remove('highlight');
-        document.getElementById('btn-toggle-interaction').textContent = '👆 移動機台';
-    }
     isDragging = false;
-}
-
-// ==========================================
-// 捲尺智慧對齊運算引擎：將 2D 畫線直接轉成 3D 空間機台對齊
-// ==========================================
-function handleRulerAlignment(x1, y1, x2, y2) {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const pxLen = Math.sqrt(dx * dx + dy * dy);
-
-    // 如果畫太短就取消，避免誤觸
-    if (pxLen < 10) return;
-
-    const angle = Math.atan2(dy, dx);
-    const centerX = (x1 + x2) / 2;
-    const centerY = (y1 + y2) / 2;
-
-    // 計算 1 像素等於 3D 空間 (Z=0 的平面，此時與相機距離=8) 的多少單位
-    const vFov = photoCamera.fov * Math.PI / 180;
-    const distanceToCamera = photoCamera.position.z; // 預設為 8
-    const viewHeight = 2 * Math.tan(vFov / 2) * distanceToCamera;
-    const pixelToWorld = viewHeight / window.innerHeight;
-
-    // 1. 移動機台：將 2D 畫面中央點反推回 3D 座標
-    const worldX = (centerX - window.innerWidth / 2) * pixelToWorld;
-    // Y 軸在網頁向下為正，Three.js 向上為正，需要加負號反轉
-    const worldY = -(centerY - window.innerHeight / 2) * pixelToWorld;
-    photoGroup.position.set(worldX, worldY, 0);
-
-    // 2. 旋轉機台：Canvas 畫線角度轉移到 3D (由於 Three.js 旋轉座標系，給予 -angle)
-    photoGroup.rotation.set(0, 0, -angle);
-
-    // 3. 縮放機台：精準算出讓機台完美包覆這條線的倍率
-    const target3DWidth = pxLen * pixelToWorld;
-    const requiredScale = target3DWidth / currentMachineTotalWidth;
-    photoGroup.scale.set(requiredScale, requiredScale, requiredScale);
 }
 
 function onMouseWheel(e) {
