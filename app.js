@@ -91,7 +91,13 @@ function initUI() {
     }
 
     document.getElementById('btn-photo-import').addEventListener('click', () => {
-        if (prepareModels()) importInput.click();
+        if (prepareModels()) {
+            importInput.classList.remove('hidden');
+            importInput.style.opacity = '0';
+            importInput.style.position = 'absolute';
+            importInput.click();
+            importInput.classList.add('hidden');
+        }
     });
 
     document.getElementById('btn-photo-capture').addEventListener('click', () => {
@@ -760,19 +766,20 @@ function takePhotoScreenshot() {
 
     ctx.drawImage(photoRenderer.domElement, 0, 0);
 
-    // 判斷當下機台是否為橫向 (轉了 -90 或 90 度附近)
-    let isMachineLandscape = false;
+    // 判斷當下機台的旋轉角度，反推最終照片的補全旋轉度
+    // photoGroup.rotation.z 如果是負的(機台順時針)，代表照片必須逆時針(也就是旋轉回正)
+    let imageRotationAngle = 0;
     if (photoGroup) {
-        // 取絕對值後判斷是否大於 45 度 (Math.PI / 4)
-        if (Math.abs(photoGroup.rotation.z) > Math.PI / 4) {
-            isMachineLandscape = true;
-        }
+        // 利用機台的 Z 軸旋轉度，捕捉 90 度 (-Math.PI/2 或 Math.PI/2) 並映射給相片
+        const pi2 = Math.PI / 2;
+        const steps = Math.round(photoGroup.rotation.z / pi2);
+        imageRotationAngle = steps * pi2;
     }
 
-    finishAndDownload(canvas, contentRect, `合成場勘_${siteName}`, isMachineLandscape);
+    finishAndDownload(canvas, contentRect, `合成場勘_${siteName}`, imageRotationAngle);
 }
 
-function finishAndDownload(canvas, contentRect, fileNamePrefix, isMachineLandscape = false) {
+function finishAndDownload(canvas, contentRect, fileNamePrefix, imageRotationAngle = 0) {
     // 截切圖片 (把黑邊裁掉) 回傳精確的實際合成圖
     let finalCanvas = canvas;
 
@@ -790,22 +797,28 @@ function finishAndDownload(canvas, contentRect, fileNamePrefix, isMachineLandsca
         finalCanvas.getContext('2d').drawImage(canvas, clipX, clipY, clipW, clipH, 0, 0, clipW, clipH);
     }
 
-    // 2. 如果偵測到機台打橫，我們直接把原本直立的照片「順時針轉 90 度」變成橫版照片！
-    if (isMachineLandscape) {
+    // 2. 如果偵測到機台打橫，我們「自動對齊」旋轉照片以符合觀看角度！
+    if (imageRotationAngle !== 0) {
         const rotatedCanvas = document.createElement('canvas');
-        // 寬高互換
-        rotatedCanvas.width = finalCanvas.height;
-        rotatedCanvas.height = finalCanvas.width;
+        const steps = Math.round(imageRotationAngle / (Math.PI / 2)) % 4; // 只取 90 度的倍數
+
+        // 當轉了奇數倍的 90 度時，寬高必須互換
+        if (Math.abs(steps) % 2 === 1) {
+            rotatedCanvas.width = finalCanvas.height;
+            rotatedCanvas.height = finalCanvas.width;
+        } else {
+            rotatedCanvas.width = finalCanvas.width;
+            rotatedCanvas.height = finalCanvas.height;
+        }
+
         const rotCtx = rotatedCanvas.getContext('2d');
-
-        // 旋轉畫布中心點
         rotCtx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
-        // Canvas 的 rotate 正值即為順時針，所以轉 Math.PI / 2
-        rotCtx.rotate(Math.PI / 2);
 
-        // 將裁切好的影像放上去
+        // 這裡將機台轉度「原封不動」賦予給畫布
+        // 當 photoGroup.rotation.z 是 -90 度時，rotCtx.rotate 也是 -90 (Canvas旋轉逆時針)，剛好把被「順時針」騙過去的視覺抵銷，讓機台在相片中變成正立的！
+        rotCtx.rotate(imageRotationAngle);
+
         rotCtx.drawImage(finalCanvas, -finalCanvas.width / 2, -finalCanvas.height / 2);
-
         finalCanvas = rotatedCanvas;
     }
 
