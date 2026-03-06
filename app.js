@@ -408,6 +408,15 @@ function startCommonARMode() {
     photoGroup = new THREE.Group();
     photoScene.add(photoGroup);
 
+    // 判斷當前螢幕是否為橫式 (寬 > 高)，若是橫式，自動將機台群組逆時針轉換 90 度 (從直立轉平)
+    const isLandscape = window.innerWidth > window.innerHeight;
+    if (isLandscape) {
+        photoGroup.rotation.z = Math.PI / 2;
+        initialRotation = Math.PI / 2;
+    } else {
+        initialRotation = 0;
+    }
+
     // 計算總寬度與 10cm 間隙
     let totalWidth = 0;
     selectedModels.forEach(modelDef => { totalWidth += modelDef.w; });
@@ -543,10 +552,15 @@ function onTouchEnd() {
 function takePhotoScreenshot() {
     if (!photoRenderer) return;
     photoRenderer.render(photoScene, photoCamera);
+
+    // 預設將整個 canvas 交出，但如果因為比例問題有上下或左右黑邊，我們記錄實際的繪製區域邊界
     const canvas = document.createElement('canvas');
     canvas.width = photoRenderer.domElement.width;
     canvas.height = photoRenderer.domElement.height;
     const ctx = canvas.getContext('2d');
+
+    // 紀錄實體照片的繪製範圍，供浮水印使用 (預設為全畫面)
+    let contentRect = { x: 0, y: 0, w: canvas.width, h: canvas.height };
 
     // 如果是即時相機模式，先將影片進度畫在底層，再疊加透明畫布
     if (liveVideoElement && liveVideoElement.readyState >= 2) {
@@ -555,24 +569,31 @@ function takePhotoScreenshot() {
         let drawW, drawH, drawX, drawY;
 
         if (videoRatio > canvasRatio) {
+            // 影片較寬，會有上下黑邊
             drawH = canvas.height;
             drawW = canvas.height * videoRatio;
             drawX = (canvas.width - drawW) / 2;
             drawY = 0;
+            contentRect = { x: drawX, y: 0, w: drawW, h: canvas.height };
         } else {
+            // 畫布較寬，會有左右黑邊
             drawW = canvas.width;
             drawH = canvas.width / videoRatio;
             drawX = 0;
             drawY = (canvas.height - drawH) / 2;
+            contentRect = { x: 0, y: drawY, w: canvas.width, h: drawH };
         }
         ctx.drawImage(liveVideoElement, drawX, drawY, drawW, drawH);
-    } // else: 若為舊相片匯入模式，PlaneGeometry 已經幫我們畫在 photoRenderer 的畫布上了
+    } else {
+        // photo模式 (PlaneGeometry 背景)
+        // 為了簡單起見，直接以全畫面計算，使用者上傳的照片 Three.js 會自行處理置中
+    }
 
     ctx.drawImage(photoRenderer.domElement, 0, 0);
-    finishAndDownload(canvas, `合成場勘_${siteName}`);
+    finishAndDownload(canvas, contentRect, `合成場勘_${siteName}`);
 }
 
-function finishAndDownload(canvas, fileNamePrefix) {
+function finishAndDownload(canvas, contentRect, fileNamePrefix) {
     const ctx = canvas.getContext('2d');
     const padding = 20 * window.devicePixelRatio;
 
@@ -592,14 +613,39 @@ function finishAndDownload(canvas, fileNamePrefix) {
     ctx.shadowOffsetY = 1 * window.devicePixelRatio;
     ctx.fillStyle = '#ffffff';
 
+    // 以 contentRect 計算出實際影像右下角極限座標
+    const actualRightX = contentRect.x + contentRect.w;
+    const actualBottomY = contentRect.y + contentRect.h;
+
+    // 若 actualRightX 超出畫布，則退回畫布邊緣，確保看得見文字
+    const safeRightX = Math.min(actualRightX, canvas.width);
+    const safeBottomY = Math.min(actualBottomY, canvas.height);
+
     lines.reverse().forEach((text, i) => {
-        ctx.fillText(text, canvas.width - padding - 10, canvas.height - padding - 15 - (i * (fontSize + 6 * window.devicePixelRatio)));
+        ctx.fillText(text, safeRightX - padding - 10, safeBottomY - padding - 15 - (i * (fontSize + 6 * window.devicePixelRatio)));
     });
 
-    // 恢復畫布陰影屬性以免影響其他繪製 (本例是最後一部無妨，但保持好習慣)
+    // 恢復畫布陰影屬性以免影響其他繪製
     ctx.shadowColor = "transparent";
 
-    const dataURL = canvas.toDataURL('image/png');
+    // 截切圖片 (把黑邊裁掉) 回傳精確的實際合成圖
+    let finalCanvas = canvas;
+
+    // 如果影片比例跟螢幕相差太大，我們只匯出真正的影片區域
+    if (contentRect.w !== canvas.width || contentRect.h !== canvas.height) {
+        // 因可能影片超出邊界 (w/h > canvas) 或在內部 (w/h < canvas)，做個安全裁切：
+        const clipX = Math.max(0, contentRect.x);
+        const clipY = Math.max(0, contentRect.y);
+        const clipW = Math.min(canvas.width, contentRect.w);
+        const clipH = Math.min(canvas.height, contentRect.h);
+
+        finalCanvas = document.createElement('canvas');
+        finalCanvas.width = clipW;
+        finalCanvas.height = clipH;
+        finalCanvas.getContext('2d').drawImage(canvas, clipX, clipY, clipW, clipH, 0, 0, clipW, clipH);
+    }
+
+    const dataURL = finalCanvas.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = dataURL;
     a.download = `${fileNamePrefix}_${Date.now()}.png`;
