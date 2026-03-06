@@ -146,6 +146,9 @@
 
   <!-- 第 2-B 層: 舊照合成 UI (新功能) -->
   <div id="photo-ar-ui" class="overlay hidden">
+    <!-- 原生 HTML 相片背景 -->
+    <img id="native-photo-bg" crossorigin="anonymous" class="hidden">
+
     <!-- 這裡會用 Three.js 在背後繪製圖片與機台 -->
     <div id="photo-watermark-preview" class="watermark-overlay">
       <span id="photo-wm-site">站點: N/A</span><br>
@@ -155,8 +158,11 @@
 
     <!-- 右上角工具列疊加層 -->
     <div class="top-right-tools">
+      <button id="btn-toggle-interaction" class="tool-btn">👆 移動機台</button>
+      <button id="btn-scale-up" class="tool-btn">➕ 放大機台</button>
+      <button id="btn-scale-down" class="tool-btn">➖ 縮小機台</button>
       <button id="btn-force-rotate" class="tool-btn">⤻ 轉90度</button>
-      <button id="btn-toggle-interaction" class="tool-btn">👆 移動</button>
+      <button id="btn-ruler-align" class="tool-btn highlight">📏 對齊捲尺</button>
     </div>
 
     <div class="bottom-bar">

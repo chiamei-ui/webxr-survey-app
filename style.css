@@ -275,3 +275,25 @@ input[type="text"] {
   background-color: rgba(0, 86, 179, 1);
   transform: scale(0.95);
 }
+
+.tool-btn.highlight {
+  background-color: #ff5722;
+  border-color: #ffccbc;
+}
+
+.tool-btn.highlight:active {
+  background-color: #e64a19;
+}
+
+#native-photo-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+  /* 讓作業系統自己搞定不變形縮放與裁切 */
+  z-index: 1;
+  /* 位於 overlay(10) 與 container(5) 之下 */
+  pointer-events: none;
+}

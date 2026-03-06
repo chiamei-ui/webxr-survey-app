@@ -440,7 +440,10 @@ let initialPinchDistance = null;
 let initialPinchAngle = null;
 let initialScale = null;
 let initialRotation = null;
-let interactionMode = 'move'; // 'move' 或 'rotate'
+let interactionMode = 'move'; // 'move', 'rotate', 'ruler'
+let currentMachineTotalWidth = 0; // 用於捲尺對齊計算
+let rulerStartPos = null;
+let rulerLineEl = null;
 
 function startCommonARMode() {
     document.getElementById('setup-ui').classList.add('hidden');
@@ -468,17 +471,41 @@ function startCommonARMode() {
     container.appendChild(photoRenderer.domElement);
 
     const toggleBtn = document.getElementById('btn-toggle-interaction');
+    const rulerBtn = document.getElementById('btn-ruler-align');
     interactionMode = 'move';
-    toggleBtn.textContent = '👆 移動';
+    toggleBtn.textContent = '👆 移動機台';
+
+    function resetModes() {
+        toggleBtn.classList.remove('highlight');
+        rulerBtn.classList.remove('highlight');
+    }
+
     toggleBtn.onclick = () => {
-        if (interactionMode === 'move') {
+        resetModes();
+        if (interactionMode === 'move' || interactionMode === 'ruler') {
             interactionMode = 'rotate';
-            toggleBtn.textContent = '🔄 旋轉';
+            toggleBtn.textContent = '🔄 旋轉機台';
+            toggleBtn.classList.add('highlight'); // 假如有樣式可用
         } else {
             interactionMode = 'move';
-            toggleBtn.textContent = '👆 移動';
+            toggleBtn.textContent = '👆 移動機台';
         }
     };
+
+    rulerBtn.onclick = () => {
+        resetModes();
+        if (interactionMode === 'ruler') {
+            interactionMode = 'move';
+            toggleBtn.textContent = '👆 移動機台';
+        } else {
+            interactionMode = 'ruler';
+            rulerBtn.classList.add('highlight');
+            toggleBtn.textContent = '👆 移動機台'; // 恢復文字避免混淆
+        }
+    };
+
+    document.getElementById('btn-scale-up').onclick = () => { if (photoGroup) photoGroup.scale.multiplyScalar(1.1); };
+    document.getElementById('btn-scale-down').onclick = () => { if (photoGroup) photoGroup.scale.multiplyScalar(0.9); };
 
     // 一鍵強制旋轉 90 度 (順時針平轉)
     const rotateBtn = document.getElementById('btn-force-rotate');
@@ -488,6 +515,20 @@ function startCommonARMode() {
             initialRotation = photoGroup.rotation.z; // 更新基準面
         }
     };
+
+    // 建立一把用於視覺反饋的紅線
+    if (!rulerLineEl) {
+        rulerLineEl = document.createElement('div');
+        rulerLineEl.style.position = 'absolute';
+        rulerLineEl.style.height = '4px';
+        rulerLineEl.style.backgroundColor = '#ff3333';
+        rulerLineEl.style.transformOrigin = 'left center';
+        rulerLineEl.style.zIndex = '50';
+        rulerLineEl.style.pointerEvents = 'none';
+        rulerLineEl.style.display = 'none';
+        rulerLineEl.style.boxShadow = '0 0 5px white';
+        document.getElementById('photo-ar-ui').appendChild(rulerLineEl);
+    }
 
     photoGroup = new THREE.Group();
     photoScene.add(photoGroup);
@@ -506,6 +547,7 @@ function startCommonARMode() {
     let totalWidth = 0;
     selectedModels.forEach(modelDef => { totalWidth += modelDef.w; });
     totalWidth += (selectedModels.length - 1) * 0.1; // 加上每台之間 10cm 的間距
+    currentMachineTotalWidth = totalWidth; // 記錄下來供捲尺計算使用
 
     let currentX = -totalWidth / 2;
     selectedModels.forEach((modelDef) => {
@@ -534,38 +576,10 @@ function startCommonARMode() {
 
 function startPhotoARMode(imageSrc) {
     startCommonARMode();
-    // 背景層
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin('anonymous');
-    loader.load(imageSrc, (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        const aspect = texture.image.width / texture.image.height;
-        const screenAspect = window.innerWidth / window.innerHeight;
-
-        // 計算距離 13 (相機 Z=8, 面板 Z=-5) 上真實的相機視錐高度與寬度
-        const vFov = photoCamera.fov * Math.PI / 180;
-        const distance = Math.abs(photoCamera.position.z - (-5));
-        const viewHeight = 2 * Math.tan(vFov / 2) * distance;
-        const viewWidth = viewHeight * screenAspect;
-
-        let geoW, geoH;
-        if (aspect > screenAspect) {
-            // 圖片比較寬，上下留黑邊 (對齊寬度)
-            geoW = viewWidth;
-            geoH = viewWidth / aspect;
-        } else {
-            // 圖片比較窄，左右留黑邊 (對齊高度)
-            geoH = viewHeight;
-            geoW = viewHeight * aspect;
-        }
-
-        const bgGeo = new THREE.PlaneGeometry(geoW, geoH);
-        const bgMat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, depthWrite: false });
-        const bgMesh = new THREE.Mesh(bgGeo, bgMat);
-        bgMesh.position.z = -5;
-        bgMesh.name = "background";
-        photoScene.add(bgMesh);
-    });
+    // 使用原生的 HTML <img> 標籤處理照片，徹底解決所有廠牌的 EXIF 與截切問題
+    const bgImg = document.getElementById('native-photo-bg');
+    bgImg.src = imageSrc;
+    bgImg.classList.remove('hidden');
 }
 
 function startLiveVideoMode() {
@@ -620,8 +634,16 @@ function onTouchStart(e) {
     if (!photoGroup) return;
 
     if (e.touches.length === 1) {
-        isDragging = true;
-        previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        if (interactionMode === 'ruler') {
+            rulerStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            rulerLineEl.style.display = 'block';
+            rulerLineEl.style.left = `${rulerStartPos.x}px`;
+            rulerLineEl.style.top = `${rulerStartPos.y}px`;
+            rulerLineEl.style.width = '0px';
+        } else {
+            isDragging = true;
+            previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        }
     } else if (e.touches.length === 2) {
         isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -637,7 +659,16 @@ function onTouchMove(e) {
     if (e.cancelable) e.preventDefault();
     if (!photoGroup) return;
 
-    if (isDragging && e.touches.length === 1) {
+    if (interactionMode === 'ruler' && rulerStartPos && e.touches.length === 1) {
+        const currentX = e.touches[0].clientX;
+        const currentY = e.touches[0].clientY;
+        const dx = currentX - rulerStartPos.x;
+        const dy = currentY - rulerStartPos.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+        rulerLineEl.style.width = `${distance}px`;
+        rulerLineEl.style.transform = `rotate(${angle}rad)`;
+    } else if (isDragging && e.touches.length === 1 && interactionMode !== 'ruler') {
         const deltaX = e.touches[0].clientX - previousMousePosition.x;
         const deltaY = e.touches[0].clientY - previousMousePosition.y;
 
@@ -665,7 +696,21 @@ function onTouchMove(e) {
     }
 }
 
-function onTouchEnd() {
+function onTouchEnd(e) {
+    if (interactionMode === 'ruler' && rulerStartPos) {
+        // 放開時，進行捲尺對齊與等比例放大縮小運算
+        if (e.changedTouches && e.changedTouches.length > 0) {
+            handleRulerAlignment(rulerStartPos.x, rulerStartPos.y, e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+        }
+        rulerStartPos = null;
+        rulerLineEl.style.display = 'none';
+
+        // 切回移動模式
+        interactionMode = 'move';
+        document.getElementById('btn-ruler-align').classList.remove('highlight');
+        document.getElementById('btn-toggle-interaction').textContent = '👆 移動機台';
+    }
+
     isDragging = false;
     initialPinchDistance = null;
     initialPinchAngle = null;
@@ -676,29 +721,92 @@ function onTouchEnd() {
 // ----------------------------------------------------
 function onMouseDown(e) {
     if (!photoGroup) return;
-    isDragging = true;
-    previousMousePosition = { x: e.clientX, y: e.clientY };
+    if (interactionMode === 'ruler') {
+        rulerStartPos = { x: e.clientX, y: e.clientY };
+        rulerLineEl.style.display = 'block';
+        rulerLineEl.style.left = `${rulerStartPos.x}px`;
+        rulerLineEl.style.top = `${rulerStartPos.y}px`;
+        rulerLineEl.style.width = '0px';
+    } else {
+        isDragging = true;
+        previousMousePosition = { x: e.clientX, y: e.clientY };
+    }
 }
 
 function onMouseMove(e) {
-    if (!photoGroup || !isDragging) return;
+    if (!photoGroup) return;
 
-    const deltaX = e.clientX - previousMousePosition.x;
-    const deltaY = e.clientY - previousMousePosition.y;
+    if (interactionMode === 'ruler' && rulerStartPos) {
+        const dx = e.clientX - rulerStartPos.x;
+        const dy = e.clientY - rulerStartPos.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+        rulerLineEl.style.width = `${distance}px`;
+        rulerLineEl.style.transform = `rotate(${angle}rad)`;
+    } else if (isDragging && interactionMode !== 'ruler') {
+        const deltaX = e.clientX - previousMousePosition.x;
+        const deltaY = e.clientY - previousMousePosition.y;
 
-    if (interactionMode === 'move') {
-        photoGroup.position.x += deltaX * 0.015;
-        photoGroup.position.y -= deltaY * 0.015;
-    } else if (interactionMode === 'rotate') {
-        photoGroup.rotation.y += deltaX * 0.01;
-        photoGroup.rotation.x += deltaY * 0.01;
+        if (interactionMode === 'move') {
+            photoGroup.position.x += deltaX * 0.015;
+            photoGroup.position.y -= deltaY * 0.015;
+        } else if (interactionMode === 'rotate') {
+            photoGroup.rotation.y += deltaX * 0.01;
+            photoGroup.rotation.x += deltaY * 0.01;
+        }
+
+        previousMousePosition = { x: e.clientX, y: e.clientY };
     }
-
-    previousMousePosition = { x: e.clientX, y: e.clientY };
 }
 
 function onMouseUp(e) {
+    if (interactionMode === 'ruler' && rulerStartPos) {
+        handleRulerAlignment(rulerStartPos.x, rulerStartPos.y, e.clientX, e.clientY);
+        rulerStartPos = null;
+        rulerLineEl.style.display = 'none';
+
+        // 切回移動模式
+        interactionMode = 'move';
+        document.getElementById('btn-ruler-align').classList.remove('highlight');
+        document.getElementById('btn-toggle-interaction').textContent = '👆 移動機台';
+    }
     isDragging = false;
+}
+
+// ==========================================
+// 捲尺智慧對齊運算引擎：將 2D 畫線直接轉成 3D 空間機台對齊
+// ==========================================
+function handleRulerAlignment(x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const pxLen = Math.sqrt(dx * dx + dy * dy);
+
+    // 如果畫太短就取消，避免誤觸
+    if (pxLen < 10) return;
+
+    const angle = Math.atan2(dy, dx);
+    const centerX = (x1 + x2) / 2;
+    const centerY = (y1 + y2) / 2;
+
+    // 計算 1 像素等於 3D 空間 (Z=0 的平面，此時與相機距離=8) 的多少單位
+    const vFov = photoCamera.fov * Math.PI / 180;
+    const distanceToCamera = photoCamera.position.z; // 預設為 8
+    const viewHeight = 2 * Math.tan(vFov / 2) * distanceToCamera;
+    const pixelToWorld = viewHeight / window.innerHeight;
+
+    // 1. 移動機台：將 2D 畫面中央點反推回 3D 座標
+    const worldX = (centerX - window.innerWidth / 2) * pixelToWorld;
+    // Y 軸在網頁向下為正，Three.js 向上為正，需要加負號反轉
+    const worldY = -(centerY - window.innerHeight / 2) * pixelToWorld;
+    photoGroup.position.set(worldX, worldY, 0);
+
+    // 2. 旋轉機台：Canvas 畫線角度轉移到 3D (由於 Three.js 旋轉座標系，給予 -angle)
+    photoGroup.rotation.set(0, 0, -angle);
+
+    // 3. 縮放機台：精準算出讓機台完美包覆這條線的倍率
+    const target3DWidth = pxLen * pixelToWorld;
+    const requiredScale = target3DWidth / currentMachineTotalWidth;
+    photoGroup.scale.set(requiredScale, requiredScale, requiredScale);
 }
 
 function onMouseWheel(e) {
@@ -747,30 +855,29 @@ function takePhotoScreenshot() {
         }
         ctx.drawImage(liveVideoElement, drawX, drawY, drawW, drawH);
     } else {
-        // photo模式 (PlaneGeometry 背景)
-        // 背景 PlaneGeometry 設在 z = -5，我們需要反推其實際佔據畫面中的比例
-        const bgMesh = photoScene.getObjectByName("background");
-        if (bgMesh && bgMesh.material.map && bgMesh.material.map.image) {
-            const img = bgMesh.material.map.image;
-            const imgRatio = img.width / img.height;
+        // photo模式 (原生 HTML img 背景)
+        const bgImg = document.getElementById("native-photo-bg");
+        if (bgImg && bgImg.src) {
+            const imgRatio = bgImg.naturalWidth / bgImg.naturalHeight;
             const canvasRatio = canvas.width / canvas.height;
 
             let drawW, drawH, drawX, drawY;
             if (imgRatio > canvasRatio) {
-                // 圖片較寬，上下有黑邊 (對齊寬度)
+                // 原圖較寬，上下留黑邊 (對齊寬幅)
                 drawW = canvas.width;
                 drawH = canvas.width / imgRatio;
                 drawX = 0;
                 drawY = (canvas.height - drawH) / 2;
                 contentRect = { x: 0, y: drawY, w: canvas.width, h: drawH };
             } else {
-                // 畫布較寬，左右有黑邊 (對齊高度)
+                // 原圖較長，左右留黑邊 (對齊高幅)
                 drawH = canvas.height;
                 drawW = canvas.height * imgRatio;
                 drawX = (canvas.width - drawW) / 2;
                 drawY = 0;
                 contentRect = { x: drawX, y: 0, w: drawW, h: canvas.height };
             }
+            ctx.drawImage(bgImg, drawX, drawY, drawW, drawH);
         }
     }
 
@@ -826,6 +933,13 @@ function finishAndDownload(canvas, contentRect, fileNamePrefix) {
     a.href = dataURL;
     a.download = `${fileNamePrefix}_${Date.now()}.png`;
     a.click();
+
+    // 關閉時清除背景，釋放記憶體
+    const bgImg = document.getElementById("native-photo-bg");
+    if (bgImg) {
+        bgImg.src = "";
+        bgImg.classList.add('hidden');
+    }
 
     document.getElementById('post-ar-ui').classList.remove('hidden');
     document.getElementById('photo-ar-ui').classList.add('hidden');
