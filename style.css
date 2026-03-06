@@ -18,16 +18,19 @@ html {
   height: 100%;
   z-index: 10;
   box-sizing: border-box;
+  pointer-events: none;
+  /* 讓底下的 3D 畫布可以接收手勢事件 */
 }
 
 .setup-panel {
   background-color: rgba(30, 30, 30, 0.95);
+  pointer-events: auto;
+  /* 設定畫面本身必須可以點擊 */
   padding: 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
   overflow-y: auto;
-  /* 恢復捲動 */
   -webkit-overflow-scrolling: touch;
 }
 

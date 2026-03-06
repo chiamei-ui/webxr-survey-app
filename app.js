@@ -71,29 +71,34 @@ function initUI() {
 
     // ========== 匯入與拍照合成模式 Start ==========
     const importInput = document.getElementById('image-upload');
-    const captureInput = document.getElementById('image-capture');
 
-    function handlePhotoAction(inputElement) {
+    function prepareModels() {
         const checkboxes = document.querySelectorAll('#model-list input:checked');
         if (checkboxes.length === 0) {
             alert("請至少先選擇一個機型");
-            return;
+            return false;
         }
         selectedModels = Array.from(checkboxes).map(cb => ({
             w: parseFloat(cb.dataset.w) / 100,
             h: parseFloat(cb.dataset.h) / 100,
             d: (parseFloat(cb.dataset.d) || 50) / 100,
+            color: cb.dataset.color || '#888888',
             img: cb.dataset.img,
             imgL: cb.dataset.imgL || null,
             imgR: cb.dataset.imgR || null
         }));
-        inputElement.click();
+        return true;
     }
 
-    document.getElementById('btn-photo-import').addEventListener('click', () => handlePhotoAction(importInput));
-    document.getElementById('btn-photo-capture').addEventListener('click', () => handlePhotoAction(captureInput));
+    document.getElementById('btn-photo-import').addEventListener('click', () => {
+        if (prepareModels()) importInput.click();
+    });
 
-    function processImageFile(e) {
+    document.getElementById('btn-photo-capture').addEventListener('click', () => {
+        if (prepareModels()) startLiveVideoMode();
+    });
+
+    importInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
@@ -102,15 +107,11 @@ function initUI() {
             };
             reader.readAsDataURL(file);
         }
-        // 重置 value 確保同一張圖重複選可觸發
         e.target.value = '';
-    }
-
-    importInput.addEventListener('change', processImageFile);
-    captureInput.addEventListener('change', processImageFile);
+    });
 
     document.getElementById('btn-photo-shutter').addEventListener('click', takePhotoScreenshot);
-    // ========== 匯入照片合成模式 End ==========
+    // ========== 匯入與拍照合成模式 End ==========
 
     // 每秒更新一次浮水印時間
     setInterval(() => {
@@ -353,9 +354,11 @@ function takeScreenshot() {
     finishAndDownload(canvas, `AR場勘_${siteName}`);
 }
 
-// 離線合成模式
+// 離線合成模式 / WebRTC 即時相機模式
 let photoScene, photoCamera, photoRenderer;
 let photoGroup = null; // 將所有機台放入單一群組連動
+let localVideoStream = null;
+let liveVideoElement = null;
 let isDragging = false;
 let previousMousePosition = { x: 0, y: 0 };
 let initialPinchDistance = null;
@@ -363,7 +366,7 @@ let initialPinchAngle = null;
 let initialScale = null;
 let initialRotation = null;
 
-function startPhotoARMode(imageSrc) {
+function startCommonARMode() {
     document.getElementById('setup-ui').classList.add('hidden');
     document.getElementById('photo-ar-ui').classList.remove('hidden');
 
@@ -373,34 +376,10 @@ function startPhotoARMode(imageSrc) {
     container.style.top = '0'; container.style.left = '0';
     container.style.width = '100vw'; container.style.height = '100vh';
     container.style.zIndex = '5';
-    container.style.touchAction = 'none'; // 防止 iOS/Android 原生畫面縮放拉扯
+    container.style.touchAction = 'none'; // 防止 iOS/Android 原生畫面縮拉扯
     document.body.appendChild(container);
 
     photoScene = new THREE.Scene();
-
-    // 背景層
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin('anonymous');
-    loader.load(imageSrc, (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        const aspect = texture.image.width / texture.image.height;
-        const screenAspect = window.innerWidth / window.innerHeight;
-
-        let geoW, geoH;
-        if (aspect > screenAspect) {
-            geoH = 15; geoW = 15 * aspect;
-        } else {
-            geoW = 15 * screenAspect; geoH = geoW / aspect;
-        }
-
-        const bgGeo = new THREE.PlaneGeometry(geoW, geoH);
-        const bgMat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, depthWrite: false });
-        const bgMesh = new THREE.Mesh(bgGeo, bgMat);
-        bgMesh.position.z = -5;
-        bgMesh.name = "background";
-        photoScene.add(bgMesh);
-    });
-
     photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
     photoCamera.position.z = 8;
 
@@ -428,6 +407,60 @@ function startPhotoARMode(imageSrc) {
     photoRenderer.setAnimationLoop(() => {
         photoRenderer.render(photoScene, photoCamera);
     });
+}
+
+function startPhotoARMode(imageSrc) {
+    startCommonARMode();
+    // 背景層
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    loader.load(imageSrc, (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const aspect = texture.image.width / texture.image.height;
+        const screenAspect = window.innerWidth / window.innerHeight;
+
+        let geoW, geoH;
+        if (aspect > screenAspect) {
+            geoH = 15; geoW = 15 * aspect;
+        } else {
+            geoW = 15 * screenAspect; geoH = geoW / aspect;
+        }
+
+        const bgGeo = new THREE.PlaneGeometry(geoW, geoH);
+        const bgMat = new THREE.MeshBasicMaterial({ map: texture, depthTest: false, depthWrite: false });
+        const bgMesh = new THREE.Mesh(bgGeo, bgMat);
+        bgMesh.position.z = -5;
+        bgMesh.name = "background";
+        photoScene.add(bgMesh);
+    });
+}
+
+function startLiveVideoMode() {
+    startCommonARMode();
+    // 建立影像元素作為背景
+    liveVideoElement = document.createElement('video');
+    liveVideoElement.setAttribute('autoplay', '');
+    liveVideoElement.setAttribute('playsinline', '');
+    liveVideoElement.setAttribute('muted', '');
+    liveVideoElement.style.position = 'fixed';
+    liveVideoElement.style.top = '0';
+    liveVideoElement.style.left = '0';
+    liveVideoElement.style.width = '100vw';
+    liveVideoElement.style.height = '100vh';
+    liveVideoElement.style.objectFit = 'cover';
+    liveVideoElement.style.zIndex = '1'; // 放最底層
+    document.body.appendChild(liveVideoElement);
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+        .then(stream => {
+            localVideoStream = stream;
+            liveVideoElement.srcObject = stream;
+            liveVideoElement.play().catch(e => console.warn(e));
+        })
+        .catch(err => {
+            alert("相機授權失敗或不支援，請改用「從相簿匯入舊照」模式。(" + err.message + ")");
+            window.location.reload();
+        });
 }
 
 function onTouchStart(e) {
@@ -487,6 +520,27 @@ function takePhotoScreenshot() {
     canvas.width = photoRenderer.domElement.width;
     canvas.height = photoRenderer.domElement.height;
     const ctx = canvas.getContext('2d');
+
+    // 如果是即時相機模式，先將影片進度畫在底層，再疊加透明畫布
+    if (liveVideoElement && liveVideoElement.readyState >= 2) {
+        const videoRatio = liveVideoElement.videoWidth / liveVideoElement.videoHeight;
+        const canvasRatio = canvas.width / canvas.height;
+        let drawW, drawH, drawX, drawY;
+
+        if (videoRatio > canvasRatio) {
+            drawH = canvas.height;
+            drawW = canvas.height * videoRatio;
+            drawX = (canvas.width - drawW) / 2;
+            drawY = 0;
+        } else {
+            drawW = canvas.width;
+            drawH = canvas.width / videoRatio;
+            drawX = 0;
+            drawY = (canvas.height - drawH) / 2;
+        }
+        ctx.drawImage(liveVideoElement, drawX, drawY, drawW, drawH);
+    } // else: 若為舊相片匯入模式，PlaneGeometry 已經幫我們畫在 photoRenderer 的畫布上了
+
     ctx.drawImage(photoRenderer.domElement, 0, 0);
     finishAndDownload(canvas, `合成場勘_${siteName}`);
 }
@@ -523,5 +577,15 @@ function finishAndDownload(canvas, fileNamePrefix) {
         container.remove();
         photoRenderer.setAnimationLoop(null);
         photoRenderer = null;
+    }
+
+    // 關閉相機串流
+    if (localVideoStream) {
+        localVideoStream.getTracks().forEach(track => track.stop());
+        localVideoStream = null;
+    }
+    if (liveVideoElement) {
+        liveVideoElement.remove();
+        liveVideoElement = null;
     }
 }
