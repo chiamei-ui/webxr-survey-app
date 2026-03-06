@@ -103,12 +103,30 @@ function initUI() {
         if (file) {
             const reader = new FileReader();
             reader.onload = (event) => {
-                startPhotoARMode(event.target.result);
+                // 強制透過 canvas 重繪來消除 iOS/Android 所帶的 EXIF Orientation 問題
+                fixImageOrientation(event.target.result, (fixedBase64) => {
+                    startPhotoARMode(fixedBase64);
+                });
             };
             reader.readAsDataURL(file);
         }
         e.target.value = '';
     });
+
+    // --- 消除 EXIF 旋轉問題的輔助工具 ---
+    function fixImageOrientation(base64Image, callback) {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement("canvas");
+            // 直接以瀏覽器解析出來的 naturalWidth 繪製 (現代瀏覽器繪製到 canvas 時會自動校正 EXIF)
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0);
+            callback(canvas.toDataURL("image/jpeg", 0.9));
+        };
+        img.src = base64Image;
+    }
 
     document.getElementById('btn-photo-shutter').addEventListener('click', takePhotoScreenshot);
     // ========== 匯入與拍照合成模式 End ==========
@@ -701,7 +719,30 @@ function takePhotoScreenshot() {
         ctx.drawImage(liveVideoElement, drawX, drawY, drawW, drawH);
     } else {
         // photo模式 (PlaneGeometry 背景)
-        // 為了簡單起見，直接以全畫面計算，使用者上傳的照片 Three.js 會自行處理置中
+        // 背景 PlaneGeometry 設在 z = -5，我們需要反推其實際佔據畫面中的比例
+        const bgMesh = photoScene.getObjectByName("background");
+        if (bgMesh && bgMesh.material.map && bgMesh.material.map.image) {
+            const img = bgMesh.material.map.image;
+            const imgRatio = img.width / img.height;
+            const canvasRatio = canvas.width / canvas.height;
+
+            let drawW, drawH, drawX, drawY;
+            if (imgRatio > canvasRatio) {
+                // 圖片較寬，上下有黑邊
+                drawH = canvas.height;
+                drawW = canvas.height * imgRatio;
+                drawX = (canvas.width - drawW) / 2;
+                drawY = 0;
+                contentRect = { x: drawX, y: 0, w: drawW, h: canvas.height };
+            } else {
+                // 畫布較寬，左右有黑邊
+                drawW = canvas.width;
+                drawH = canvas.width / imgRatio;
+                drawX = 0;
+                drawY = (canvas.height - drawH) / 2;
+                contentRect = { x: 0, y: drawY, w: canvas.width, h: drawH };
+            }
+        }
     }
 
     ctx.drawImage(photoRenderer.domElement, 0, 0);
