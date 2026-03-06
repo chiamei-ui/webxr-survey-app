@@ -245,10 +245,17 @@ input[type="text"] {
   background-color: #28a745;
 }
 
-.mode-toggle-btn {
+.top-right-tools {
   position: absolute;
   top: 10px;
   right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 20;
+}
+
+.tool-btn {
   background-color: rgba(0, 123, 255, 0.8);
   color: white;
   border: 1px solid rgba(255, 255, 255, 0.5);
@@ -258,5 +265,8 @@ input[type="text"] {
   font-weight: bold;
   pointer-events: auto;
   cursor: pointer;
-  z-index: 20;
+}
+
+.tool-btn:active {
+  background-color: rgba(0, 86, 179, 0.9);
 }

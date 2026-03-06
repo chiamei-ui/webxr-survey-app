@@ -432,14 +432,23 @@ function startCommonARMode() {
 
     const toggleBtn = document.getElementById('btn-toggle-interaction');
     interactionMode = 'move';
-    toggleBtn.textContent = '👆 目前操作：移動';
+    toggleBtn.textContent = '👆 移動';
     toggleBtn.onclick = () => {
         if (interactionMode === 'move') {
             interactionMode = 'rotate';
-            toggleBtn.textContent = '🔄 目前操作：旋轉';
+            toggleBtn.textContent = '🔄 旋轉';
         } else {
             interactionMode = 'move';
-            toggleBtn.textContent = '👆 目前操作：移動';
+            toggleBtn.textContent = '👆 移動';
+        }
+    };
+
+    // 一鍵強制旋轉 90 度 (順時針平轉)
+    const rotateBtn = document.getElementById('btn-force-rotate');
+    rotateBtn.onclick = () => {
+        if (photoGroup) {
+            photoGroup.rotation.z -= Math.PI / 2; // 轉 90 度
+            initialRotation = photoGroup.rotation.z; // 更新基準面
         }
     };
 
@@ -473,6 +482,13 @@ function startCommonARMode() {
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
     photoRenderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
     photoRenderer.domElement.addEventListener('touchend', onTouchEnd);
+
+    // 電腦滑鼠支援
+    photoRenderer.domElement.addEventListener('mousedown', onMouseDown);
+    photoRenderer.domElement.addEventListener('mousemove', onMouseMove);
+    photoRenderer.domElement.addEventListener('mouseup', onMouseUp);
+    photoRenderer.domElement.addEventListener('mouseleave', onMouseUp);
+    photoRenderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
 
     photoRenderer.setAnimationLoop(() => {
         photoRenderer.render(photoScene, photoCamera);
@@ -607,6 +623,46 @@ function onTouchEnd() {
     initialPinchDistance = null;
     initialPinchAngle = null;
 }
+
+// ----------------------------------------------------
+// 電腦版滑鼠與滾輪支援 (映射至 Touch 邏輯)
+// ----------------------------------------------------
+function onMouseDown(e) {
+    if (!photoGroup) return;
+    isDragging = true;
+    previousMousePosition = { x: e.clientX, y: e.clientY };
+}
+
+function onMouseMove(e) {
+    if (!photoGroup || !isDragging) return;
+
+    const deltaX = e.clientX - previousMousePosition.x;
+    const deltaY = e.clientY - previousMousePosition.y;
+
+    if (interactionMode === 'move') {
+        photoGroup.position.x += deltaX * 0.015;
+        photoGroup.position.y -= deltaY * 0.015;
+    } else if (interactionMode === 'rotate') {
+        photoGroup.rotation.y += deltaX * 0.01;
+        photoGroup.rotation.x += deltaY * 0.01;
+    }
+
+    previousMousePosition = { x: e.clientX, y: e.clientY };
+}
+
+function onMouseUp(e) {
+    isDragging = false;
+}
+
+function onMouseWheel(e) {
+    e.preventDefault();
+    if (!photoGroup) return;
+
+    // 滾輪向前 (deltaY < 0) 放大，向後縮小
+    const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    photoGroup.scale.multiplyScalar(scaleFactor);
+}
+// ----------------------------------------------------
 
 function takePhotoScreenshot() {
     if (!photoRenderer) return;
