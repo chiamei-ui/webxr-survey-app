@@ -294,6 +294,20 @@ function onSelect() {
     }
 }
 
+// --- 統一的橫直向判斷 ---
+function checkIsLandscape() {
+    // 優先使用 screen orientation API
+    if (window.screen && window.screen.orientation) {
+        return window.screen.orientation.type.includes('landscape');
+    }
+    // 其次使用 window.orientation (舊版 iOS)
+    if (typeof window.orientation !== 'undefined') {
+        return Math.abs(window.orientation) === 90;
+    }
+    // 最後 fallback 寬高比
+    return window.innerWidth > window.innerHeight;
+}
+
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -305,7 +319,7 @@ function onWindowResize() {
 
         // 即時檢查當下方向並翻轉機台
         if (photoGroup) {
-            const isLandscape = window.innerWidth > window.innerHeight;
+            const isLandscape = checkIsLandscape();
             if (isLandscape) {
                 photoGroup.rotation.z = Math.PI / 2;
                 initialRotation = Math.PI / 2;
@@ -315,7 +329,18 @@ function onWindowResize() {
             }
         }
     }
+
+    // 如果即時視訊存在，稍微觸發它重新套用 CSS cover 以因應螢幕旋轉
+    if (typeof liveVideoElement !== 'undefined' && liveVideoElement) {
+        liveVideoElement.style.width = window.innerWidth + 'px';
+        liveVideoElement.style.height = window.innerHeight + 'px';
+    }
 }
+
+// 監聽轉向事件 (針對不一定觸發 resize 或延遲的 iOS/Android)
+window.addEventListener("orientationchange", () => {
+    setTimeout(onWindowResize, 100); // 延遲一下讓瀏覽器畫布更新
+});
 
 function render(timestamp, frame) {
     if (frame) {
@@ -421,8 +446,8 @@ function startCommonARMode() {
     photoGroup = new THREE.Group();
     photoScene.add(photoGroup);
 
-    // 初始判斷當前螢幕是否為橫式 (寬 > 高)
-    const isLandscape = window.innerWidth > window.innerHeight;
+    // 初始判斷當前螢幕是否為橫式
+    const isLandscape = checkIsLandscape();
     if (isLandscape) {
         photoGroup.rotation.z = Math.PI / 2;
         initialRotation = Math.PI / 2;
@@ -509,7 +534,7 @@ function startLiveVideoMode() {
                     // 以相機回傳的實際影像比例來決定是否橫向
                     const cameraIsLandscape = liveVideoElement.videoWidth > liveVideoElement.videoHeight;
                     // 以視窗比例來決定是否橫向
-                    const windowIsLandscape = window.innerWidth > window.innerHeight;
+                    const windowIsLandscape = checkIsLandscape();
 
                     // 若相機傳來的是橫的，或視窗是橫的，我們都嘗試將機台打橫
                     if (cameraIsLandscape || windowIsLandscape) {
