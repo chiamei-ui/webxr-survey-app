@@ -113,16 +113,29 @@ function initUI() {
         e.target.value = '';
     });
 
-    // --- 消除 EXIF 旋轉問題的輔助工具 ---
+    // --- 消除 EXIF 旋轉問題與縮放超大圖片防呆的工具 ---
     function fixImageOrientation(base64Image, callback) {
         const img = new Image();
         img.onload = () => {
             const canvas = document.createElement("canvas");
-            // 直接以瀏覽器解析出來的 naturalWidth 繪製 (現代瀏覽器繪製到 canvas 時會自動校正 EXIF)
-            canvas.width = img.naturalWidth;
-            canvas.height = img.naturalHeight;
+            let targetW = img.naturalWidth;
+            let targetH = img.naturalHeight;
+            const MAX_SIZE = 2560; // 限制最大解析度以防 WebGL Texture 記憶體爆掉
+
+            if (targetW > MAX_SIZE || targetH > MAX_SIZE) {
+                if (targetW > targetH) {
+                    targetH = Math.round((targetH * MAX_SIZE) / targetW);
+                    targetW = MAX_SIZE;
+                } else {
+                    targetW = Math.round((targetW * MAX_SIZE) / targetH);
+                    targetH = MAX_SIZE;
+                }
+            }
+
+            canvas.width = targetW;
+            canvas.height = targetH;
             const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0);
+            ctx.drawImage(img, 0, 0, targetW, targetH);
             callback(canvas.toDataURL("image/jpeg", 0.9));
         };
         img.src = base64Image;
@@ -746,48 +759,24 @@ function takePhotoScreenshot() {
     }
 
     ctx.drawImage(photoRenderer.domElement, 0, 0);
-    finishAndDownload(canvas, contentRect, `合成場勘_${siteName}`);
+
+    // 判斷當下機台是否為橫向 (轉了 -90 或 90 度附近)
+    let isMachineLandscape = false;
+    if (photoGroup) {
+        // 取絕對值後判斷是否大於 45 度 (Math.PI / 4)
+        if (Math.abs(photoGroup.rotation.z) > Math.PI / 4) {
+            isMachineLandscape = true;
+        }
+    }
+
+    finishAndDownload(canvas, contentRect, `合成場勘_${siteName}`, isMachineLandscape);
 }
 
-function finishAndDownload(canvas, contentRect, fileNamePrefix) {
-    const ctx = canvas.getContext('2d');
-    const padding = 20 * window.devicePixelRatio;
-
-    // 浮水印字體縮小三分之一 (原為 26 -> 現為 17)
-    const fontSize = 17 * window.devicePixelRatio;
-    ctx.font = `bold ${fontSize}px sans-serif`;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
-
-    const now = new Date().toLocaleString();
-    const lines = [`站點: ${siteName}`, `GPS: ${gpsData.lat}, ${gpsData.lng}`, now];
-
-    // 白字加陰影設定，移除黑色矩形底色
-    ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
-    ctx.shadowBlur = 4 * window.devicePixelRatio;
-    ctx.shadowOffsetX = 1 * window.devicePixelRatio;
-    ctx.shadowOffsetY = 1 * window.devicePixelRatio;
-    ctx.fillStyle = '#ffffff';
-
-    // 以 contentRect 計算出實際影像右下角極限座標
-    const actualRightX = contentRect.x + contentRect.w;
-    const actualBottomY = contentRect.y + contentRect.h;
-
-    // 若 actualRightX 超出畫布，則退回畫布邊緣，確保看得見文字
-    const safeRightX = Math.min(actualRightX, canvas.width);
-    const safeBottomY = Math.min(actualBottomY, canvas.height);
-
-    lines.reverse().forEach((text, i) => {
-        ctx.fillText(text, safeRightX - padding - 10, safeBottomY - padding - 15 - (i * (fontSize + 6 * window.devicePixelRatio)));
-    });
-
-    // 恢復畫布陰影屬性以免影響其他繪製
-    ctx.shadowColor = "transparent";
-
+function finishAndDownload(canvas, contentRect, fileNamePrefix, isMachineLandscape = false) {
     // 截切圖片 (把黑邊裁掉) 回傳精確的實際合成圖
     let finalCanvas = canvas;
 
-    // 如果影片比例跟螢幕相差太大，我們只匯出真正的影片區域
+    // 1. 如果影片比例跟螢幕相差太大，我們只匯出真正的影片區域
     if (contentRect.w !== canvas.width || contentRect.h !== canvas.height) {
         // 因可能影片超出邊界 (w/h > canvas) 或在內部 (w/h < canvas)，做個安全裁切：
         const clipX = Math.max(0, contentRect.x);
@@ -800,6 +789,49 @@ function finishAndDownload(canvas, contentRect, fileNamePrefix) {
         finalCanvas.height = clipH;
         finalCanvas.getContext('2d').drawImage(canvas, clipX, clipY, clipW, clipH, 0, 0, clipW, clipH);
     }
+
+    // 2. 如果偵測到機台打橫，我們直接把原本直立的照片「順時針轉 90 度」變成橫版照片！
+    if (isMachineLandscape) {
+        const rotatedCanvas = document.createElement('canvas');
+        // 寬高互換
+        rotatedCanvas.width = finalCanvas.height;
+        rotatedCanvas.height = finalCanvas.width;
+        const rotCtx = rotatedCanvas.getContext('2d');
+
+        // 旋轉畫布中心點
+        rotCtx.translate(rotatedCanvas.width / 2, rotatedCanvas.height / 2);
+        // Canvas 的 rotate 正值即為順時針，所以轉 Math.PI / 2
+        rotCtx.rotate(Math.PI / 2);
+
+        // 將裁切好的影像放上去
+        rotCtx.drawImage(finalCanvas, -finalCanvas.width / 2, -finalCanvas.height / 2);
+
+        finalCanvas = rotatedCanvas;
+    }
+
+    // 3. 將浮水印壓印在「最終裁切並可能旋轉過」的照片上
+    const finalCtx = finalCanvas.getContext('2d');
+    const padding = 20 * window.devicePixelRatio;
+    const fontSize = 17 * window.devicePixelRatio;
+
+    finalCtx.font = `bold ${fontSize}px sans-serif`;
+    finalCtx.textAlign = 'right';
+    finalCtx.textBaseline = 'bottom';
+
+    finalCtx.shadowColor = "rgba(0, 0, 0, 0.8)";
+    finalCtx.shadowBlur = 4 * window.devicePixelRatio;
+    finalCtx.shadowOffsetX = 1 * window.devicePixelRatio;
+    finalCtx.shadowOffsetY = 1 * window.devicePixelRatio;
+    finalCtx.fillStyle = '#ffffff';
+
+    const now = new Date().toLocaleString();
+    const watermarkLines = [`站點: ${siteName}`, `GPS: ${gpsData.lat}, ${gpsData.lng}`, now];
+
+    // 在最終確定好的實體長寬 (finalCanvas.width/height) 右下角畫浮水印
+    watermarkLines.reverse().forEach((text, i) => {
+        finalCtx.fillText(text, finalCanvas.width - padding - 10, finalCanvas.height - padding - 15 - (i * (fontSize + 6 * window.devicePixelRatio)));
+    });
+    finalCtx.shadowColor = "transparent";
 
     const dataURL = finalCanvas.toDataURL('image/png');
     const a = document.createElement('a');
