@@ -218,7 +218,8 @@ input[type="text"] {
 /* 拍照按鈕 */
 .bottom-bar {
   position: fixed;
-  bottom: 30px;
+  bottom: 0px; /* 改為由 padding 控制 */
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
   width: 100%;
   display: flex;
   justify-content: center;
@@ -333,3 +334,39 @@ input[type="text"] {
   /* 位於黑底之上，canvas(5) 之下 */
   pointer-events: none;
 }
+
+/* ---------------------------------------------------- */
+/* 行動裝置小螢幕優化 (@media max-width: 600px) */
+/* ---------------------------------------------------- */
+@media screen and (max-width: 600px) {
+  .top-right-tools {
+    top: 8px;
+    right: 8px;
+    gap: 8px;
+  }
+
+  .tool-btn {
+    padding: 8px 14px;
+    font-size: 0.95rem;
+    border-radius: 20px;
+  }
+
+  .tool-row {
+    gap: 6px;
+  }
+
+  .tool-btn.half {
+    padding: 8px 4px;
+    font-size: 0.85rem;
+  }
+
+  .shutter-btn {
+    width: 60px;
+    height: 60px;
+  }
+  
+  .watermark-overlay {
+    font-size: 0.7rem;
+    padding: 5px;
+  }
+}

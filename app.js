@@ -587,7 +587,7 @@ let interactionMode = 'move'; // 'move', 'rotate'
 let currentARMode = null; // 'live_video', 'photo_import', 'webxr'
 
 function cleanupARSession() {
-    // 關閉時清除背景，釋放記憶體
+    // 關閉時清除背景
     const bgImg = document.getElementById("native-photo-bg");
     if (bgImg) {
         bgImg.src = "";
@@ -603,6 +603,7 @@ function cleanupARSession() {
     }
     if (photoRenderer) {
         photoRenderer.setAnimationLoop(null);
+        photoRenderer.dispose(); // 徹底釋放 GPU 資源
         photoRenderer = null;
     }
 
@@ -617,19 +618,48 @@ function cleanupARSession() {
     }
 
     photoGroup = null;
+    photoScene = null;
+    photoCamera = null;
 }
 
 function startCommonARMode() {
     document.getElementById('setup-ui').classList.add('hidden');
     document.getElementById('photo-ar-ui').classList.remove('hidden');
 
-    const container = document.createElement('div');
+    // ---- 關鍵修復：場景重用檢查 ----
+    let container = document.getElementById('photo-ar-container');
+    if (container) {
+        // 如果已經有容器，代表是「繼續拍攝」，我們不重複創建 Renderer 與場景
+        // 只需要清空背景內容即可
+        if (liveVideoElement) {
+            liveVideoElement.remove();
+            liveVideoElement = null;
+        }
+        if (localVideoStream) {
+            localVideoStream.getTracks().forEach(track => track.stop());
+            localVideoStream = null;
+        }
+        const bgImg = document.getElementById("native-photo-bg");
+        if (bgImg) { bgImg.src = ""; bgImg.classList.add('hidden'); }
+
+        // 重設群組變換
+        if (photoGroup) {
+            photoGroup.position.set(0, 0, 0);
+            photoGroup.scale.set(1, 1, 1);
+            photoGroup.rotation.set(0, 0, initialRotation || 0);
+        }
+        rebuildModelGroup();
+        return; 
+    }
+
+    // 若無容器，則是第一次啟動
+    container = document.createElement('div');
     container.id = 'photo-ar-container';
     container.style.position = 'fixed';
     container.style.top = '0'; container.style.left = '0';
     container.style.width = '100vw'; container.style.height = '100vh';
     container.style.zIndex = '5';
-    container.style.touchAction = 'none'; // 防止 iOS/Android 原生畫面縮拉扯
+    container.style.touchAction = 'none'; 
     document.body.appendChild(container);
 
     photoScene = new THREE.Scene();
