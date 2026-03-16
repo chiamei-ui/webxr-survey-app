@@ -246,12 +246,19 @@ function initThree() {
         selectedModels = Array.from(checkboxes).map(cb => ({
             w: parseFloat(cb.dataset.w) / 100,
             h: parseFloat(cb.dataset.h) / 100,
-            d: (parseFloat(cb.dataset.d) || 50) / 100,
-            color: cb.dataset.color || '#888888', // 取出主題色
-            img: cb.dataset.img,
             imgL: cb.dataset.imgL || null,
             imgR: cb.dataset.imgR || null,
-            imgB: cb.dataset.imgB || null
+            imgB: cb.dataset.imgB || null,
+            imgT: cb.dataset.imgT || null,
+            hasCap: cb.dataset.hasCap === 'true',
+            capW: parseFloat(cb.dataset.capW) / 100 || 0,
+            capH: parseFloat(cb.dataset.capH) / 100 || 0,
+            capD: parseFloat(cb.dataset.capD) / 100 || 0,
+            capImg: cb.dataset.capImg || null,
+            capImgL: cb.dataset.capImgL || null,
+            capImgR: cb.dataset.capImgR || null,
+            capImgB: cb.dataset.capImgB || null,
+            capImgT: cb.dataset.capImgT || null
         }));
         document.getElementById('setup-ui').classList.add('hidden');
         document.getElementById('ar-ui').classList.remove('hidden');
@@ -275,53 +282,85 @@ function initThree() {
 }
 
 function createMachine3D(modelDef) {
+    const group = new THREE.Group();
     const textureLoader = new THREE.TextureLoader();
     textureLoader.setCrossOrigin('anonymous');
-
-    // 解析我們給予的 Hex 色碼字串為 THREE.Color 物件
     const themeColor = new THREE.Color(modelDef.color);
 
-    // 準備 6 面材質 [右, 左, 上, 下, 正, 背]
-    const materials = [];
-    const faceConfigs = [
+    // --- 1. 建立主體機身 ---
+    const mainMaterials = [];
+    const mainFaceConfigs = [
         { key: 'imgR', fallback: modelDef.img }, // 右
         { key: 'imgL', fallback: modelDef.img }, // 左
-        { key: null, color: themeColor },        // 上 (套用主題色)
-        { key: null, color: themeColor },        // 下 (套用主題色)
+        { key: 'imgT', color: themeColor },      // 上
+        { key: null, color: themeColor },        // 下
         { key: 'img', fallback: modelDef.img },  // 正
-        { key: 'imgB', color: themeColor }       // 背 (如果有 imgB 則用，否則用主題色)
+        { key: 'imgB', color: themeColor }       // 背
     ];
 
-    faceConfigs.forEach((config) => {
+    mainFaceConfigs.forEach((config) => {
         const path = config.key ? (modelDef[config.key] || config.fallback) : null;
         if (path) {
-            const texture = textureLoader.load(
-                path,
-                (tex) => {
-                    tex.colorSpace = THREE.SRGBColorSpace;
-                },
-                undefined,
-                (err) => {
-                    console.error(`🔴 貼圖加載失敗: ${path}`);
-                }
-            );
-            materials.push(new THREE.MeshBasicMaterial({
+            const texture = textureLoader.load(path);
+            texture.colorSpace = THREE.SRGBColorSpace;
+            mainMaterials.push(new THREE.MeshBasicMaterial({
                 map: texture,
-                transparent: !!path.includes('.png'), // 如果是 png 則啟用透明度
+                transparent: true,
                 alphaTest: 0.1
             }));
         } else {
-            materials.push(new THREE.MeshBasicMaterial({ color: config.color }));
+            mainMaterials.push(new THREE.MeshBasicMaterial({ color: config.color }));
         }
     });
 
-    // 1. Entity: 建立 Box 幾何體
-    const geometry = new THREE.BoxGeometry(modelDef.w, modelDef.h, modelDef.d);
-    // 將中心點移至底部
-    geometry.translate(0, modelDef.h / 2, 0);
+    const mainGeo = new THREE.BoxGeometry(modelDef.w, modelDef.h, modelDef.d);
+    mainGeo.translate(0, modelDef.h / 2, 0);
+    const mainMesh = new THREE.Mesh(mainGeo, mainMaterials);
+    group.add(mainMesh);
 
-    // 3. Dimensions: 結合幾何與材質建立模型
-    return new THREE.Mesh(geometry, materials);
+    // --- 2. 建立瓶蓋箱配件 (如果有的話) ---
+    if (modelDef.hasCap && modelDef.capImg) {
+        const capMaterials = [];
+        const capFaceConfigs = [
+            { key: 'capImgR', fallback: modelDef.capImg }, // 右
+            { key: 'capImgL', fallback: modelDef.capImg }, // 左
+            { key: 'capImgT', color: themeColor },         // 上
+            { key: null, color: themeColor },              // 下
+            { key: 'capImg', fallback: modelDef.capImg },  // 正
+            { key: 'capImgB', color: themeColor }          // 背
+        ];
+
+        capFaceConfigs.forEach((config) => {
+            const path = config.key ? (modelDef[config.key] || config.fallback) : null;
+            if (path) {
+                const texture = textureLoader.load(path);
+                texture.colorSpace = THREE.SRGBColorSpace;
+                capMaterials.push(new THREE.MeshBasicMaterial({ map: texture, transparent: true, alphaTest: 0.1 }));
+            } else {
+                capMaterials.push(new THREE.MeshBasicMaterial({ color: config.color }));
+            }
+        });
+
+        const capGeo = new THREE.BoxGeometry(modelDef.capW, modelDef.capH, modelDef.capD);
+        capGeo.translate(0, modelDef.capH / 2, 0);
+        const capMesh = new THREE.Mesh(capGeo, capMaterials);
+        
+        // **關鍵：水平對齊與正面切齊**
+        // 1. X 軸：主體右側
+        capMesh.position.x = (modelDef.w / 2) + (modelDef.capW / 2);
+        
+        // 2. Z 軸：正面對齊 (Front Face Alignment)
+        // BoxGeometry 的 Z 軸中心在 0, 正面在 +D/2, 背面在 -D/2
+        // 要讓配件正面對齊主體正面：
+        // 配件正面 Z = capMesh.position.z + (capD / 2)
+        // 主體正面 Z = 0 + (mainD / 2)
+        // 令兩者相等 => capMesh.position.z = (modelDef.d / 2) - (modelDef.capD / 2)
+        capMesh.position.z = (modelDef.d / 2) - (modelDef.capD / 2);
+        
+        group.add(capMesh);
+    }
+
+    return group;
 }
 
 function onSelect() {
