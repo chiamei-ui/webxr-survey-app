@@ -21,6 +21,31 @@ initThree();
 // ------------------------------------------------------------------
 // 1. 初始化介面與 GPS API
 // ------------------------------------------------------------------
+// ---- 全域的圖片輸入參考 ----
+let importInputRef = null;
+
+// ---- 全域的場景重繪函式 ----
+function rebuildModelGroup() {
+    if (!photoGroup) return;
+    while (photoGroup.children.length > 0) {
+        photoGroup.remove(photoGroup.children[0]);
+    }
+    let totalWidth = 0;
+    selectedModels.forEach(modelDef => {
+        totalWidth += modelDef.w;
+        if (modelDef.hasCap) totalWidth += modelDef.capW;
+    });
+    totalWidth += (selectedModels.length - 1) * 0.1;
+    let currentX = -totalWidth / 2;
+    selectedModels.forEach((modelDef) => {
+        const machine = createMachine3D(modelDef);
+        const unitWidth = modelDef.w + (modelDef.hasCap ? modelDef.capW : 0);
+        machine.position.set(currentX + modelDef.w / 2, -1, 1 - (modelDef.d / 2));
+        photoGroup.add(machine);
+        currentX += unitWidth + 0.1;
+    });
+}
+
 function initUI() {
     const gpsStatus = document.getElementById('gps-status');
 
@@ -33,45 +58,39 @@ function initUI() {
                 gpsStatus.textContent = `Lat: ${gpsData.lat}, Lng: ${gpsData.lng}`;
                 document.getElementById('wm-gps').textContent = `GPS: ${gpsData.lat}, ${gpsData.lng}`;
             },
-            (err) => {
-                gpsStatus.textContent = `無法取得 GPS (${err.message})`;
-            },
+            (err) => { gpsStatus.textContent = `無法取得 GPS (${err.message})`; },
             { enableHighAccuracy: true }
         );
     } else {
         gpsStatus.textContent = "瀏覽器不支援 GPS";
     }
 
-    // 啟動 GPS 請求時的防卡死邏輯
     setTimeout(() => {
         if (gpsStatus.textContent === "等待授權中...") {
             gpsStatus.textContent = "等待授權中 (請注意瀏覽器權限提示)";
         }
     }, 3000);
 
-    // 監聽站點輸入
     document.getElementById('site-name').addEventListener('input', (e) => {
         siteName = e.target.value || '未命名站點';
         document.getElementById('wm-site').textContent = `站點: ${siteName}`;
     });
 
-    // 拍照按鈕
     document.getElementById('btn-shutter').addEventListener('click', takeScreenshot);
 
-    // 繼續或重新開始
+    // ---- 先宣告 importInput，讓後面所有監聽器都能用 ----
+    const importInput = document.getElementById('image-upload');
+    importInputRef = importInput; // 存入全域供其他函式使用
+
+    // ---- 繼續拍攝 (同機型) ----
     document.getElementById('btn-continue').addEventListener('click', () => {
         document.getElementById('post-ar-ui').classList.add('hidden');
 
-        // 1. 位置重置：回歸初始狀態
+        // 位置重置
         if (photoGroup) {
             photoGroup.position.set(0, 0, 0);
             photoGroup.rotation.set(0, 0, initialRotation || 0);
             photoGroup.scale.set(1, 1, 1);
-        }
-
-        // 2. 如果是照片匯入模式，應選擇新相片
-        if (currentARMode === 'photo_import') {
-            importInput.click();
         }
 
         // 重新顯示操作層
@@ -80,15 +99,18 @@ function initUI() {
         } else {
             document.getElementById('ar-ui').classList.remove('hidden');
         }
+
+        // 照片匯入模式：自動彈出選片 (需在顯示 UI 後執行，確保在 user gesture 鏈中)
+        if (currentARMode === 'photo_import') {
+            setTimeout(() => importInput.click(), 50);
+        }
     });
 
     document.getElementById('btn-restart').addEventListener('click', () => {
         window.location.reload();
     });
 
-    // ========== 匯入與拍照合成模式 Start ==========
-    const importInput = document.getElementById('image-upload');
-
+    // ---- prepareModels ----
     function prepareModels() {
         const checkboxes = document.querySelectorAll('#model-list input.machine-check:checked');
         if (checkboxes.length === 0) {
@@ -98,7 +120,6 @@ function initUI() {
         selectedModels = Array.from(checkboxes).map(cb => {
             const capCheckbox = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
             const askForCap = capCheckbox ? capCheckbox.checked : false;
-
             return {
                 w: parseFloat(cb.dataset.w) / 100,
                 h: parseFloat(cb.dataset.h) / 100,
@@ -123,66 +144,52 @@ function initUI() {
         return true;
     }
 
-    // 新增：查看機台尺寸按鈕
+    // ---- 查看尺寸按鈕 ----
     document.getElementById('btn-view-dimensions').addEventListener('click', () => {
         const checkboxes = document.querySelectorAll('#model-list input.machine-check:checked');
-        if (checkboxes.length === 0) {
-            alert("請先勾選您想查詢的機台！");
-            return;
-        }
+        if (checkboxes.length === 0) { alert("請先勾選您想查詢的機台！"); return; }
 
         let msg = "您選擇的機台尺寸如下 (單位: cm)：\n\n";
-        let totalW = 0;
-        let maxD = 0;
-        const spacing = 10; 
+        let totalW = 0, maxD = 0;
+        const spacing = 10;
 
-        const selectedNodes = Array.from(checkboxes);
-        selectedNodes.forEach((cb, index) => {
+        Array.from(checkboxes).forEach((cb, index) => {
             const name = cb.parentElement.textContent.trim();
             const w = parseFloat(cb.dataset.w);
             const h = parseFloat(cb.dataset.h);
             const d = parseFloat(cb.dataset.d || "50");
-            
-            let currentUnitW = w;
-            let currentUnitD = d;
+            let cUnitW = w, cUnitD = d;
 
             msg += `• [${name}]: ${w} x ${d} x ${h}\n`;
-            
-            const capCheckbox = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
-            if (capCheckbox && capCheckbox.checked && cb.dataset.capW) {
+
+            const capCb = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
+            if (capCb && capCb.checked && cb.dataset.capW) {
                 const cw = parseFloat(cb.dataset.capW);
                 const cd = parseFloat(cb.dataset.capD);
                 const ch = parseFloat(cb.dataset.capH);
                 msg += `  ↳ (+ 瓶蓋箱): ${cw} x ${cd} x ${ch}\n`;
-                currentUnitW += cw;
-                if (cd > currentUnitD) currentUnitD = cd;
+                cUnitW += cw;
+                if (cd > cUnitD) cUnitD = cd;
             }
-
-            totalW += currentUnitW;
-            if (currentUnitD > maxD) maxD = currentUnitD;
-            
-            if (index < selectedNodes.length - 1) {
-                totalW += spacing;
-            }
+            totalW += cUnitW;
+            if (cUnitD > maxD) maxD = cUnitD;
+            if (index < checkboxes.length - 1) totalW += spacing;
         });
-        
+
         msg += `\n----------------------\n`;
         msg += `📏 預估佔用總寬度: ${totalW.toFixed(1)} cm (含 10cm 間隙)\n`;
         msg += `📐 預估最大進深: ${maxD.toFixed(1)} cm\n`;
-        
         alert(msg);
     });
 
+    // ---- 匯入舊照 (手機版直接 click file input) ----
     document.getElementById('btn-photo-import').addEventListener('click', () => {
         if (prepareModels()) {
-            importInput.classList.remove('hidden');
-            importInput.style.opacity = '0';
-            importInput.style.position = 'absolute';
             importInput.click();
-            importInput.classList.add('hidden');
         }
     });
 
+    // ---- 立即拍照 ----
     document.getElementById('btn-photo-capture').addEventListener('click', () => {
         if (prepareModels()) startLiveVideoMode();
     });
@@ -208,7 +215,6 @@ function initUI() {
             let targetW = img.naturalWidth;
             let targetH = img.naturalHeight;
             const MAX_SIZE = 2560;
-
             if (targetW > MAX_SIZE || targetH > MAX_SIZE) {
                 if (targetW > targetH) {
                     targetH = Math.round((targetH * MAX_SIZE) / targetW);
@@ -218,7 +224,6 @@ function initUI() {
                     targetH = MAX_SIZE;
                 }
             }
-
             canvas.width = targetW;
             canvas.height = targetH;
             const ctx = canvas.getContext("2d");
@@ -230,13 +235,21 @@ function initUI() {
 
     document.getElementById('btn-photo-shutter').addEventListener('click', takePhotoScreenshot);
 
+    // 變換機台順序 (全局級綁定，确保 AR 模式啟動前後都有效)
+    document.getElementById('btn-reorder-models')?.addEventListener('click', () => {
+        if (selectedModels.length <= 1) return;
+        const first = selectedModels.shift();
+        selectedModels.push(first);
+        rebuildModelGroup();
+    });
+
     setInterval(() => {
         const now = new Date();
-        const timeStr = now.toLocaleString();
-        const wmTime = document.getElementById('wm-time');
-        const photoWmTime = document.getElementById('photo-wm-time');
-        if (wmTime) wmTime.textContent = timeStr;
-        if (photoWmTime) photoWmTime.textContent = timeStr;
+        const t = now.toLocaleString();
+        const a = document.getElementById('wm-time');
+        const b = document.getElementById('photo-wm-time');
+        if (a) a.textContent = t;
+        if (b) b.textContent = t;
     }, 1000);
 
     initLevelMeter();
@@ -671,44 +684,8 @@ function startCommonARMode() {
         }
     };
 
-    // 重新排列機台順序功能
-    document.getElementById('btn-reorder-models').onclick = () => {
-        if (selectedModels.length <= 1) return;
-        // 把第一台移到最後一台 (循環位移)
-        const first = selectedModels.shift();
-        selectedModels.push(first);
-        // 重新繪製
-        rebuildModelGroup();
-    };
-
     photoGroup = new THREE.Group();
     photoScene.add(photoGroup);
-
-    function rebuildModelGroup() {
-        if (!photoGroup) return;
-        // 先清空現有機台
-        while(photoGroup.children.length > 0){ 
-            photoGroup.remove(photoGroup.children[0]); 
-        }
-
-        // 計算總寬度與 10cm 間隙
-        let totalWidth = 0;
-        selectedModels.forEach(modelDef => { 
-            totalWidth += modelDef.w; 
-            if (modelDef.hasCap) totalWidth += modelDef.capW;
-        });
-        totalWidth += (selectedModels.length - 1) * 0.1;
-
-        let currentX = -totalWidth / 2;
-        selectedModels.forEach((modelDef) => {
-            const machine = createMachine3D(modelDef);
-            const unitWidth = modelDef.w + (modelDef.hasCap ? modelDef.capW : 0);
-            // 正面對齊 Z=1
-            machine.position.set(currentX + modelDef.w / 2, -1, 1 - (modelDef.d / 2));
-            photoGroup.add(machine);
-            currentX += unitWidth + 0.1;
-        });
-    }
 
     // 初始進入時執行一次繪製
     rebuildModelGroup();
