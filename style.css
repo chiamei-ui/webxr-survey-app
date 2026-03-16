@@ -11,15 +11,17 @@ html {
 }
 
 .overlay {
-  position: absolute;
+  position: fixed; /* 改為 fixed 避免 iOS Safari 計算誤差 */
   top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
+  /* 使用 dvh 自動指算看得到的可用視窗高度 (iOS 16+)
+     對於舊設備 dvh 不支援時升竴回 100vh */
+  height: 100vh;
+  height: 100dvh;
   z-index: 10;
   box-sizing: border-box;
   pointer-events: none;
-  /* 讓底下的 3D 畫布可以接收手勢事件 */
 }
 
 .setup-panel {
@@ -268,13 +270,19 @@ input[type="text"] {
 
 .top-right-tools {
   position: absolute;
-  top: 15px;
+  top: env(safe-area-inset-top, 15px);
   right: 15px;
+  /* 高度上限與捲動，防止按鈕群溢出畫面底端 */
+  max-height: calc(100dvh - 30px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* 控醒滿動標記 (iOS) */
+  scrollbar-width: none; /* Firefox */
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 10px;
   z-index: 50;
-  /* 確保高於浮水印與其他全螢幕元件 */
+  padding-bottom: 10px;
 }
 
 .tool-row {
@@ -336,37 +344,57 @@ input[type="text"] {
 }
 
 /* ---------------------------------------------------- */
-/* 行動裝置小螢幕優化 (@media max-width: 600px) */
+/* 行動裝置小螢幕優化 (max-width: 480px, 含 iPhone 14 Pro Max) */
 /* ---------------------------------------------------- */
-@media screen and (max-width: 600px) {
+@media screen and (max-width: 480px) {
   .top-right-tools {
-    top: 8px;
+    top: max(env(safe-area-inset-top, 8px), 8px);
     right: 8px;
-    gap: 8px;
+    gap: 7px;
   }
 
   .tool-btn {
-    padding: 8px 14px;
-    font-size: 0.95rem;
-    border-radius: 20px;
+    padding: 7px 12px;
+    font-size: 0.88rem;
+    border-radius: 18px;
   }
 
   .tool-row {
-    gap: 6px;
+    gap: 5px;
   }
 
   .tool-btn.half {
-    padding: 8px 4px;
-    font-size: 0.85rem;
+    padding: 6px 4px;
+    font-size: 0.8rem;
   }
 
   .shutter-btn {
-    width: 60px;
-    height: 60px;
+    width: 55px;
+    height: 55px;
   }
   
-  .watermark-overlay {
-    font-size: 0.7rem;
-    padding: 5px;
+  .watermark-overlay,
+  #watermark-preview {
+    font-size: 0.65rem;
+    padding: 4px 6px;
+    max-width: 55vw;
   }
-}
+}
+
+/* 橫向模式優化：畫面高度不足時緊縮按鈕 */
+@media screen and (max-height: 500px) {
+  .top-right-tools {
+    gap: 5px;
+  }
+
+  .tool-btn {
+    padding: 5px 10px;
+    font-size: 0.8rem;
+  }
+
+  .shutter-btn {
+    width: 45px;
+    height: 45px;
+  }
+}
+
