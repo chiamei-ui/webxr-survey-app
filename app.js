@@ -657,16 +657,26 @@ function startCommonARMode() {
 
     // 計算總寬度與 10cm 間隙
     let totalWidth = 0;
-    selectedModels.forEach(modelDef => { totalWidth += modelDef.w; });
+    selectedModels.forEach(modelDef => { 
+        totalWidth += modelDef.w; 
+        if (modelDef.hasCap) totalWidth += modelDef.capW;
+    });
     totalWidth += (selectedModels.length - 1) * 0.1; // 加上每台之間 10cm 的間距
 
     let currentX = -totalWidth / 2;
     selectedModels.forEach((modelDef) => {
         const machine = createMachine3D(modelDef);
-        // 設定位置：目前 X 起點加上該機台一半的寬度
-        machine.position.set(currentX + modelDef.w / 2, -1, 1);
+        
+        // 該機組元件的總寬度 (主機 + 瓶蓋箱)
+        const unitWidth = modelDef.w + (modelDef.hasCap ? modelDef.capW : 0);
+        
+        // 設定位置：目前 X 起點加上「主機寬度一半」。
+        // Z 軸關鍵修正：為了讓「正面」維持在同一個水平切面上 (Z=1)，
+        // 必須扣除機台深度的一半，這樣不論深度多少，正面都會剛好切齊在 Z=1 平面上。
+        machine.position.set(currentX + modelDef.w / 2, -1, 1 - (modelDef.d / 2));
+        
         photoGroup.add(machine);
-        currentX += modelDef.w + 0.1; // 累加至下一台的起點
+        currentX += unitWidth + 0.1; // 累加「主主機+箱體」的總寬度至下一台的起點
     });
 
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
