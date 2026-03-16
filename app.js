@@ -15,9 +15,6 @@ let hitTestSource = null;
 let hitTestSourceRequested = false;
 let placedBillboards = []; // 存放已放置的機台
 
-initUI();
-initThree();
-
 // ------------------------------------------------------------------
 // 1. 初始化介面與 GPS API
 // ------------------------------------------------------------------
@@ -989,3 +986,7 @@ function finishAndDownload(canvas, contentRect, fileNamePrefix) {
     document.getElementById('photo-ar-ui').classList.add('hidden');
     document.getElementById('ar-ui').classList.add('hidden');
 }
+
+// ---- 正式啟動程式 ----
+initUI();
+initThree();
