@@ -80,22 +80,67 @@ function initUI() {
     const importInput = document.getElementById('image-upload');
 
     function prepareModels() {
-        const checkboxes = document.querySelectorAll('#model-list input:checked');
+        // 更新選擇邏輯：只找 .machine-check (主機)，另外尋找隔壁的 .cap-check 是否打勾
+        const checkboxes = document.querySelectorAll('#model-list input.machine-check:checked');
         if (checkboxes.length === 0) {
             alert("請至少先選擇一個機型");
             return false;
         }
-        selectedModels = Array.from(checkboxes).map(cb => ({
-            w: parseFloat(cb.dataset.w) / 100,
-            h: parseFloat(cb.dataset.h) / 100,
-            d: (parseFloat(cb.dataset.d) || 50) / 100,
-            color: cb.dataset.color || '#888888',
-            img: cb.dataset.img,
-            imgL: cb.dataset.imgL || null,
-            imgR: cb.dataset.imgR || null
-        }));
+        selectedModels = Array.from(checkboxes).map(cb => {
+            // 從 cb 的父元素 (label) 的下一個兄弟節點 (label.cap-option) 找 checkbox
+            const capCheckbox = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
+            const askForCap = capCheckbox ? capCheckbox.checked : false;
+
+            return {
+                w: parseFloat(cb.dataset.w) / 100,
+                h: parseFloat(cb.dataset.h) / 100,
+                d: (parseFloat(cb.dataset.d) || 50) / 100,
+                color: cb.dataset.color || '#888888',
+                img: cb.dataset.img,
+                imgL: cb.dataset.imgL || null,
+                imgR: cb.dataset.imgR || null,
+                imgB: cb.dataset.imgB || null,
+                imgT: cb.dataset.imgT || null,
+                
+                // 瓶蓋箱邏輯：只有當有提供 capW 資料且使用者真的有勾選才為 true
+                hasCap: (cb.dataset.capW !== undefined) && askForCap,
+                capW: parseFloat(cb.dataset.capW) / 100 || 0,
+                capH: parseFloat(cb.dataset.capH) / 100 || 0,
+                capD: parseFloat(cb.dataset.capD) / 100 || 0,
+                capImg: cb.dataset.capImg || null,
+                capImgL: cb.dataset.capImgL || null,
+                capImgR: cb.dataset.capImgR || null,
+                capImgB: cb.dataset.capImgB || null,
+                capImgT: cb.dataset.capImgT || null
+            };
+        });
         return true;
     }
+
+    // 新增：查看機台尺寸按鈕
+    document.getElementById('btn-view-dimensions').addEventListener('click', () => {
+        const checkboxes = document.querySelectorAll('#model-list input.machine-check:checked');
+        if (checkboxes.length === 0) {
+            alert("請先勾選您想查詢的機台！");
+            return;
+        }
+        
+        let msg = "您選擇的機台尺寸如下 (寬 x 深 x 高 / 單位: cm)：\n\n";
+        Array.from(checkboxes).forEach(cb => {
+            const name = cb.parentElement.textContent.trim();
+            const w = cb.dataset.w;
+            const h = cb.dataset.h;
+            const d = cb.dataset.d || "50";
+            msg += `• [${name}]: ${w} x ${d} x ${h}\n`;
+            
+            const capCheckbox = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
+            if (capCheckbox && capCheckbox.checked && cb.dataset.capW) {
+                msg += `  ↳ (+ 瓶蓋箱): ${cb.dataset.capW} x ${cb.dataset.capD} x ${cb.dataset.capH}\n`;
+            }
+        });
+        
+        alert(msg);
+    });
 
     document.getElementById('btn-photo-import').addEventListener('click', () => {
         if (prepareModels()) {
@@ -239,27 +284,39 @@ function initThree() {
 
     const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
     arButton.addEventListener('click', () => {
-        const checkboxes = document.querySelectorAll('#model-list input:checked');
+        const checkboxes = document.querySelectorAll('#model-list input.machine-check:checked');
         if (checkboxes.length === 0) {
             alert("請至少選擇一個機型");
+            // 注意：進入 AR 畫面後無法隨意中止，故僅作提醒
         }
-        selectedModels = Array.from(checkboxes).map(cb => ({
-            w: parseFloat(cb.dataset.w) / 100,
-            h: parseFloat(cb.dataset.h) / 100,
-            imgL: cb.dataset.imgL || null,
-            imgR: cb.dataset.imgR || null,
-            imgB: cb.dataset.imgB || null,
-            imgT: cb.dataset.imgT || null,
-            hasCap: cb.dataset.hasCap === 'true',
-            capW: parseFloat(cb.dataset.capW) / 100 || 0,
-            capH: parseFloat(cb.dataset.capH) / 100 || 0,
-            capD: parseFloat(cb.dataset.capD) / 100 || 0,
-            capImg: cb.dataset.capImg || null,
-            capImgL: cb.dataset.capImgL || null,
-            capImgR: cb.dataset.capImgR || null,
-            capImgB: cb.dataset.capImgB || null,
-            capImgT: cb.dataset.capImgT || null
-        }));
+        
+        selectedModels = Array.from(checkboxes).map(cb => {
+            const capCheckbox = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
+            const askForCap = capCheckbox ? capCheckbox.checked : false;
+
+            return {
+                w: parseFloat(cb.dataset.w) / 100,
+                h: parseFloat(cb.dataset.h) / 100,
+                d: (parseFloat(cb.dataset.d) || 50) / 100,
+                color: cb.dataset.color || '#888888',
+                img: cb.dataset.img,
+                imgL: cb.dataset.imgL || null,
+                imgR: cb.dataset.imgR || null,
+                imgB: cb.dataset.imgB || null,
+                imgT: cb.dataset.imgT || null,
+                
+                hasCap: (cb.dataset.capW !== undefined) && askForCap,
+                capW: parseFloat(cb.dataset.capW) / 100 || 0,
+                capH: parseFloat(cb.dataset.capH) / 100 || 0,
+                capD: parseFloat(cb.dataset.capD) / 100 || 0,
+                capImg: cb.dataset.capImg || null,
+                capImgL: cb.dataset.capImgL || null,
+                capImgR: cb.dataset.capImgR || null,
+                capImgB: cb.dataset.capImgB || null,
+                capImgT: cb.dataset.capImgT || null
+            };
+        });
+        
         document.getElementById('setup-ui').classList.add('hidden');
         document.getElementById('ar-ui').classList.remove('hidden');
     });
