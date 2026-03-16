@@ -60,10 +60,21 @@ function initUI() {
 
     // 繼續或重新開始
     document.getElementById('btn-continue').addEventListener('click', () => {
-        // 隱藏完成面板
         document.getElementById('post-ar-ui').classList.add('hidden');
 
-        // 重新顯示剛剛隱藏起來的拍照與編輯控制項與操作層，完全不銷毀畫布與照片
+        // 1. 位置重置：回歸初始狀態
+        if (photoGroup) {
+            photoGroup.position.set(0, 0, 0);
+            photoGroup.rotation.set(0, 0, initialRotation || 0);
+            photoGroup.scale.set(1, 1, 1);
+        }
+
+        // 2. 如果是照片匯入模式，應選擇新相片
+        if (currentARMode === 'photo_import') {
+            importInput.click();
+        }
+
+        // 重新顯示操作層
         if (currentARMode === 'photo_import' || currentARMode === 'live_video') {
             document.getElementById('photo-ar-ui').classList.remove('hidden');
         } else {
@@ -72,7 +83,6 @@ function initUI() {
     });
 
     document.getElementById('btn-restart').addEventListener('click', () => {
-        // 簡單作法：重新整理網頁
         window.location.reload();
     });
 
@@ -80,14 +90,12 @@ function initUI() {
     const importInput = document.getElementById('image-upload');
 
     function prepareModels() {
-        // 更新選擇邏輯：只找 .machine-check (主機)，另外尋找隔壁的 .cap-check 是否打勾
         const checkboxes = document.querySelectorAll('#model-list input.machine-check:checked');
         if (checkboxes.length === 0) {
             alert("請至少先選擇一個機型");
             return false;
         }
         selectedModels = Array.from(checkboxes).map(cb => {
-            // 從 cb 的父元素 (label) 的下一個兄弟節點 (label.cap-option) 找 checkbox
             const capCheckbox = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
             const askForCap = capCheckbox ? capCheckbox.checked : false;
 
@@ -101,8 +109,6 @@ function initUI() {
                 imgR: cb.dataset.imgR || null,
                 imgB: cb.dataset.imgB || null,
                 imgT: cb.dataset.imgT || null,
-                
-                // 瓶蓋箱邏輯：只有當有提供 capW 資料且使用者真的有勾選才為 true
                 hasCap: (cb.dataset.capW !== undefined) && askForCap,
                 capW: parseFloat(cb.dataset.capW) / 100 || 0,
                 capH: parseFloat(cb.dataset.capH) / 100 || 0,
@@ -124,20 +130,45 @@ function initUI() {
             alert("請先勾選您想查詢的機台！");
             return;
         }
-        
-        let msg = "您選擇的機台尺寸如下 (寬 x 深 x 高 / 單位: cm)：\n\n";
-        Array.from(checkboxes).forEach(cb => {
+
+        let msg = "您選擇的機台尺寸如下 (單位: cm)：\n\n";
+        let totalW = 0;
+        let maxD = 0;
+        const spacing = 10; 
+
+        const selectedNodes = Array.from(checkboxes);
+        selectedNodes.forEach((cb, index) => {
             const name = cb.parentElement.textContent.trim();
-            const w = cb.dataset.w;
-            const h = cb.dataset.h;
-            const d = cb.dataset.d || "50";
+            const w = parseFloat(cb.dataset.w);
+            const h = parseFloat(cb.dataset.h);
+            const d = parseFloat(cb.dataset.d || "50");
+            
+            let currentUnitW = w;
+            let currentUnitD = d;
+
             msg += `• [${name}]: ${w} x ${d} x ${h}\n`;
             
             const capCheckbox = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
             if (capCheckbox && capCheckbox.checked && cb.dataset.capW) {
-                msg += `  ↳ (+ 瓶蓋箱): ${cb.dataset.capW} x ${cb.dataset.capD} x ${cb.dataset.capH}\n`;
+                const cw = parseFloat(cb.dataset.capW);
+                const cd = parseFloat(cb.dataset.capD);
+                const ch = parseFloat(cb.dataset.capH);
+                msg += `  ↳ (+ 瓶蓋箱): ${cw} x ${cd} x ${ch}\n`;
+                currentUnitW += cw;
+                if (cd > currentUnitD) currentUnitD = cd;
+            }
+
+            totalW += currentUnitW;
+            if (currentUnitD > maxD) maxD = currentUnitD;
+            
+            if (index < selectedNodes.length - 1) {
+                totalW += spacing;
             }
         });
+        
+        msg += `\n----------------------\n`;
+        msg += `📏 預估佔用總寬度: ${totalW.toFixed(1)} cm (含 10cm 間隙)\n`;
+        msg += `📐 預估最大進深: ${maxD.toFixed(1)} cm\n`;
         
         alert(msg);
     });
@@ -161,7 +192,6 @@ function initUI() {
         if (file) {
             const reader = new FileReader();
             reader.onload = (event) => {
-                // 強制透過 canvas 重繪來消除 iOS/Android 所帶的 EXIF Orientation 問題
                 fixImageOrientation(event.target.result, (fixedBase64) => {
                     startPhotoARMode(fixedBase64);
                 });
@@ -171,14 +201,13 @@ function initUI() {
         e.target.value = '';
     });
 
-    // --- 消除 EXIF 旋轉問題與縮放超大圖片防呆的工具 ---
     function fixImageOrientation(base64Image, callback) {
         const img = new Image();
         img.onload = () => {
             const canvas = document.createElement("canvas");
             let targetW = img.naturalWidth;
             let targetH = img.naturalHeight;
-            const MAX_SIZE = 2560; // 限制最大解析度以防 WebGL Texture 記憶體爆掉
+            const MAX_SIZE = 2560;
 
             if (targetW > MAX_SIZE || targetH > MAX_SIZE) {
                 if (targetW > targetH) {
@@ -200,16 +229,16 @@ function initUI() {
     }
 
     document.getElementById('btn-photo-shutter').addEventListener('click', takePhotoScreenshot);
-    // ========== 匯入與拍照合成模式 End ==========
 
-    // 每秒更新一次浮水印時間
     setInterval(() => {
         const now = new Date();
-        document.getElementById('wm-time').textContent = now.toLocaleString();
-        document.getElementById('photo-wm-time').textContent = now.toLocaleString();
+        const timeStr = now.toLocaleString();
+        const wmTime = document.getElementById('wm-time');
+        const photoWmTime = document.getElementById('photo-wm-time');
+        if (wmTime) wmTime.textContent = timeStr;
+        if (photoWmTime) photoWmTime.textContent = timeStr;
     }, 1000);
 
-    // 啟動水平儀
     initLevelMeter();
 }
 
@@ -642,8 +671,47 @@ function startCommonARMode() {
         }
     };
 
+    // 重新排列機台順序功能
+    document.getElementById('btn-reorder-models').onclick = () => {
+        if (selectedModels.length <= 1) return;
+        // 把第一台移到最後一台 (循環位移)
+        const first = selectedModels.shift();
+        selectedModels.push(first);
+        // 重新繪製
+        rebuildModelGroup();
+    };
+
     photoGroup = new THREE.Group();
     photoScene.add(photoGroup);
+
+    function rebuildModelGroup() {
+        if (!photoGroup) return;
+        // 先清空現有機台
+        while(photoGroup.children.length > 0){ 
+            photoGroup.remove(photoGroup.children[0]); 
+        }
+
+        // 計算總寬度與 10cm 間隙
+        let totalWidth = 0;
+        selectedModels.forEach(modelDef => { 
+            totalWidth += modelDef.w; 
+            if (modelDef.hasCap) totalWidth += modelDef.capW;
+        });
+        totalWidth += (selectedModels.length - 1) * 0.1;
+
+        let currentX = -totalWidth / 2;
+        selectedModels.forEach((modelDef) => {
+            const machine = createMachine3D(modelDef);
+            const unitWidth = modelDef.w + (modelDef.hasCap ? modelDef.capW : 0);
+            // 正面對齊 Z=1
+            machine.position.set(currentX + modelDef.w / 2, -1, 1 - (modelDef.d / 2));
+            photoGroup.add(machine);
+            currentX += unitWidth + 0.1;
+        });
+    }
+
+    // 初始進入時執行一次繪製
+    rebuildModelGroup();
 
     // 初始判斷當前螢幕是否為橫式
     const isLandscape = checkIsLandscape();
@@ -654,30 +722,6 @@ function startCommonARMode() {
         photoGroup.rotation.z = 0;
         initialRotation = 0;
     }
-
-    // 計算總寬度與 10cm 間隙
-    let totalWidth = 0;
-    selectedModels.forEach(modelDef => { 
-        totalWidth += modelDef.w; 
-        if (modelDef.hasCap) totalWidth += modelDef.capW;
-    });
-    totalWidth += (selectedModels.length - 1) * 0.1; // 加上每台之間 10cm 的間距
-
-    let currentX = -totalWidth / 2;
-    selectedModels.forEach((modelDef) => {
-        const machine = createMachine3D(modelDef);
-        
-        // 該機組元件的總寬度 (主機 + 瓶蓋箱)
-        const unitWidth = modelDef.w + (modelDef.hasCap ? modelDef.capW : 0);
-        
-        // 設定位置：目前 X 起點加上「主機寬度一半」。
-        // Z 軸關鍵修正：為了讓「正面」維持在同一個水平切面上 (Z=1)，
-        // 必須扣除機台深度的一半，這樣不論深度多少，正面都會剛好切齊在 Z=1 平面上。
-        machine.position.set(currentX + modelDef.w / 2, -1, 1 - (modelDef.d / 2));
-        
-        photoGroup.add(machine);
-        currentX += unitWidth + 0.1; // 累加「主主機+箱體」的總寬度至下一台的起點
-    });
 
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
     photoRenderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
