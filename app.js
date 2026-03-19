@@ -915,39 +915,45 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     let PW = getFloorPoint(pW);
     let PD = getFloorPoint(pD);
 
-    // 4. 重構機台方向
-    let dirX = new THREE.Vector3().subVectors(PW, P1).normalize();
-    dirX.y = 0; dirX.normalize(); // 保證底邊貼齊水平地面
-
-    let upY = new THREE.Vector3(0, 1, 0);
-    let finalZ = new THREE.Vector3().crossVectors(dirX, upY).normalize();
-
-    let dirZ = new THREE.Vector3().subVectors(PD, P1).normalize();
+    // 4. 重構機台方向 (3D 基底)
+    let dirX_raw = new THREE.Vector3().subVectors(PW, P1).normalize();
+    
+    // 5. 鎖定 Yaw (0/90) 改進版：相對於相機視軸進行 Snap
+    // 我們要讓機台的正面「正對」或「正側對」著相機，而非世界 Z 軸。
+    let camDir = new THREE.Vector3();
+    photoCamera.getWorldDirection(camDir);
+    camDir.y = 0; camDir.normalize();
+    
+    // 計算黃線 (Width) 在地面上與相機視軸的夾角
+    let angleToCam = Math.atan2(dirX_raw.x, dirX_raw.z) - Math.atan2(camDir.x, camDir.z);
+    
+    // 依照視覺長短決定是正面 (0) 還是側面 (90)
+    let targetRelativeYaw = (wLen >= dLen) ? 0 : Math.PI / 2;
+    
+    // 預防背面 (180) 被誤認為正面：檢查深度線 PD 與相機方向的點積
+    let dirZ_raw = new THREE.Vector3().subVectors(PD, P1).normalize();
     let isFrontRight = false;
     
-    // 預防背面朝向攝影機 (點積判斷)
-    if (finalZ.dot(dirZ) > 0) {
-        finalZ.negate();
-        dirX.negate();
+    // 如果深度線是指向攝影機的，代表我們標記的是右前角
+    if (raycaster.ray.direction.dot(dirZ_raw) > 0) {
         isFrontRight = true;
     }
 
-    // 5. 鎖定 Yaw (0/90)
-    // 直接憑畫面上哪條線拉得比較長判定正面
-    let yaw = 0;
-    if (wLen < dLen) {
-        yaw = isFrontRight ? -Math.PI / 2 : Math.PI / 2;
-    }
+    // 將相對角度 Snap 到 90 度倍數
+    let snappedRelYaw = Math.round(angleToCam / (Math.PI / 2)) * (Math.PI / 2);
     
-    // Y 軸鎖定在 0 度，由相機處理 Roll
-    photoGroup.rotation.set(0, yaw, 0);
+    // 最終世界 Yaw = 相機 Yaw + 被 Snap 過的相對 Yaw + 視覺修正 (0 or 90)
+    let finalWorldYaw = Math.atan2(camDir.x, camDir.z) + snappedRelYaw + targetRelativeYaw;
+
+    // Y 軸鎖定在 0 (垂直)，由相機 Z 軸 Roll 處理歪斜
+    photoGroup.rotation.set(0, finalWorldYaw, 0);
 
     // 6. 縮放與定位
     let dist3D = P1.distanceTo(PW);
     let modelScale = dist3D / currentRealWidth;
     photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    // 定位 Offset
+    // 定位 Offset (錨點在 corner)
     let cornerX = isFrontRight ? (currentRealWidth / 2) : (-currentRealWidth / 2);
     let localCorner = new THREE.Vector3(cornerX, -1, 1);
     let worldOffset = localCorner.clone().multiplyScalar(modelScale).applyQuaternion(photoGroup.quaternion);
