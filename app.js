@@ -18,9 +18,9 @@ let placedBillboards = []; // 存放已放置的機台
 // 透視畫線全域變數
 let currentRealWidth = 1;
 let currentRealDepth = 1;
-let drawState = 0; // 0: none, 1: drawing W, 2: drawing D, 3: drawing H
+let drawState = 0; // 0: none, 1: drawing W, 2: drawing D
 let anchor_O = {x:0, y:0};
-let vec_w = {x:0, y:0}, vec_d = {x:0, y:0}, vec_h = {x:0, y:0};
+let vec_w = {x:0, y:0}, vec_d = {x:0, y:0};
 
 // ------------------------------------------------------------------
 // 1. 初始化介面與 GPS API
@@ -867,79 +867,53 @@ function updateLineSVG(id, p1, p2) {
     line.setAttribute('visibility', 'visible');
 }
 
-function applyPerspectiveTransform(vw, vd, vh, anchor_O) {
+function applyPerspectiveTransform(vw, vd, anchorPt) {
     if (!photoGroup || !photoCamera) return;
 
-    // 將像素向量轉換為 Three.js 螢幕座標 (Y需反向)
-    let dwx = vw.x;
-    let dwy = -vw.y; 
-    let ddx = vd.x;
-    let ddy = -vd.y;
-    let dhx = vh.x;
-    let dhy = -vh.y;
+    // --- 純 Yaw 旋轉：Y 軸永遠垂直螢幕 ---
+    let wLen = Math.hypot(vw.x, vw.y);
+    let dLen = Math.hypot(vd.x, vd.y);
+    if (wLen < 5) return;
 
-    let ux = dwx / currentRealWidth;
-    let uy = dwy / currentRealWidth;
-    let vx = ddx / currentRealDepth;
-    let vy = ddy / currentRealDepth;
+    // 2D 叉積決定旋轉方向 (螢幕座標，Y 向下)
+    // cross > 0 → 深度線在寬度線「順時針」側 → 機台斜右
+    // cross < 0 → 深度線在寬度線「逆時針」側 → 機台斜左
+    let cross2D = vw.x * vd.y - vw.y * vd.x;
 
-    let A = ux * vx + uy * vy;
-    let B = (vx * vx + vy * vy) - (ux * ux + uy * uy);
+    // Yaw 角度 = atan( (dLen / realDepth) / (wLen / realWidth) )
+    let yawAbs = Math.atan2(dLen / currentRealDepth, wLen / currentRealWidth);
+    let yaw = (cross2D < 0) ? yawAbs : -yawAbs;
 
-    let z2_sq = (-B + Math.sqrt(B * B + 4 * A * A)) / 2;
-    let z2 = Math.sqrt(Math.max(0, z2_sq));
-    let z1 = z2 !== 0 ? A / z2 : Math.sqrt(Math.max(0, B));
+    // 套用旋轉，只有 Y 軸旋轉，無 Pitch / Roll
+    photoGroup.rotation.set(0, yaw, 0);
 
-    let Vx = new THREE.Vector3(ux, uy, z1);
-    let Vz = new THREE.Vector3(-vx, -vy, z2);
-    let Vy = new THREE.Vector3().crossVectors(Vz, Vx);
+    // --- 縮放 ---
+    let visibleHeight = 2 * photoCamera.position.z *
+        Math.tan(THREE.MathUtils.degToRad(photoCamera.fov / 2));
+    let pixPerMeter = window.innerHeight / visibleHeight;
+    let cosYaw = Math.cos(yaw);
+    // 寬度線像素長度 = realWidth * |cos(yaw)| * scale * pixPerMeter
+    let modelScale = (Math.abs(cosYaw) > 0.01)
+        ? wLen / (currentRealWidth * Math.abs(cosYaw) * pixPerMeter)
+        : dLen / (currentRealDepth * Math.abs(Math.sin(yaw)) * pixPerMeter);
 
-    // Necker Cube 反轉檢查：確認 Y 軸與用戶所畫的高度線 (vh) 同向
-    // 若相乘為負數，表示解出的法向量剛好顛倒，翻轉之。
-    let dotY = Vy.x * dhx + Vy.y * dhy;
-    if (dotY < 0) {
-        z1 = -z1;
-        z2 = -z2;
-        Vx.z = z1;
-        Vz.z = z2;
-        Vy.crossVectors(Vz, Vx); // 重新計算
-    }
-
-    let S = Vx.length();
-    if (S === 0) return;
-
-    Vx.normalize();
-    Vy.normalize();
-    Vz.normalize();
-
-    let R = new THREE.Matrix4().makeBasis(Vx, Vy, Vz);
-
-    // 套用計算出來的 3D 旋轉矩陣
-    photoGroup.quaternion.setFromRotationMatrix(R);
-
-    // 換算縮放
-    let visibleHeightMeters = 2 * photoCamera.position.z * Math.tan( THREE.MathUtils.degToRad( photoCamera.fov / 2 ) );
-    let pixelsPerMeter = window.innerHeight / visibleHeightMeters;
-    let modelScale = S / pixelsPerMeter;
-    
     photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    // 將所點選的 anchor_O 解析為 3D 世界座標的射線著陸點
-    let ndcX = (anchor_O.x / window.innerWidth) * 2 - 1;
-    let ndcY = -(anchor_O.y / window.innerHeight) * 2 + 1;
-    
-    let targetPos = new THREE.Vector3(ndcX, ndcY, 0.5);
-    targetPos.unproject(photoCamera);
-    let dir = targetPos.sub(photoCamera.position).normalize();
-    let distance = photoCamera.position.z; 
-    let finalPos = photoCamera.position.clone().add(dir.multiplyScalar(distance));
-    
-    // 計算群組在 Local Space 的左前底角 (對應使用者起手畫的第一個點)
+    // --- 定位：原點角落對齊 anchor ---
+    let ndcX = (anchorPt.x / window.innerWidth) * 2 - 1;
+    let ndcY = -(anchorPt.y / window.innerHeight) * 2 + 1;
+    let target = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
+    let dir = target.sub(photoCamera.position).normalize();
+    let worldPos = photoCamera.position.clone().add(
+        dir.multiplyScalar(photoCamera.position.z)
+    );
+
+    // 機台底部左前角 (Local Space)
     let localCorner = new THREE.Vector3(-currentRealWidth / 2, -1, 1);
-    let worldOffset = localCorner.multiplyScalar(modelScale).applyQuaternion(photoGroup.quaternion);
-    
-    // 令群組的左前底角直接與使用者所點選的 anchor_O 對齊
-    photoGroup.position.copy(finalPos).sub(worldOffset);
+    let worldOffset = localCorner.clone().multiplyScalar(modelScale);
+    worldOffset.applyEuler(new THREE.Euler(0, yaw, 0));
+
+    photoGroup.position.copy(worldPos).sub(worldOffset);
 }
 
 // ----------------------------------------------------
@@ -961,13 +935,9 @@ function handlePointerDown(e) {
                 anchorEl.setAttribute('visibility', 'visible');
             }
         } else if (drawState === 2) {
-            previousMousePosition = p; // 記住起點，讓使用者到處滑都行
+            previousMousePosition = p;
             vec_d = {x: 0, y: 0};
             updateLineSVG('line-depth', anchor_O, anchor_O);
-        } else if (drawState === 3) {
-            previousMousePosition = p;
-            vec_h = {x: 0, y: 0};
-            updateLineSVG('line-height', anchor_O, anchor_O);
         }
         isDragging = true;
         if (e.cancelable) e.preventDefault();
@@ -1001,10 +971,6 @@ function handlePointerMove(e) {
             let delta = { x: p.x - previousMousePosition.x, y: p.y - previousMousePosition.y };
             vec_d = delta;
             updateLineSVG('line-depth', anchor_O, { x: anchor_O.x + delta.x, y: anchor_O.y + delta.y });
-        } else if (drawState === 3) {
-            let delta = { x: p.x - previousMousePosition.x, y: p.y - previousMousePosition.y };
-            vec_h = delta;
-            updateLineSVG('line-height', anchor_O, { x: anchor_O.x + delta.x, y: anchor_O.y + delta.y });
         }
         return;
     }
@@ -1059,17 +1025,10 @@ function handlePointerUp(e) {
                 document.getElementById('line-depth').setAttribute('visibility', 'hidden');
                 return;
             }
-            drawState = 3;
-            document.getElementById('perspective-hint').textContent = '最後，請拖曳畫出【垂直高度線】(代表機體往上延伸的方向)';
-        } else if (drawState === 3) {
-            if (Math.hypot(vec_h.x, vec_h.y) < 20) {
-                document.getElementById('line-height').setAttribute('visibility', 'hidden');
-                return;
-            }
             document.getElementById('perspective-hint').classList.add('hidden');
             
-            // 執行核心運算與轉換
-            applyPerspectiveTransform(vec_w, vec_d, vec_h, anchor_O);
+            // 執行純 Yaw 運算與轉換
+            applyPerspectiveTransform(vec_w, vec_d, anchor_O);
             
             // 完成後自動切換回移動模式
             const btnMove = document.getElementById('btn-mode-move');
