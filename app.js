@@ -18,8 +18,8 @@ let placedBillboards = []; // 存放已放置的機台
 // 透視畫線全域變數
 let currentRealWidth = 1;
 let currentRealDepth = 1;
-let drawState = 0; // 0: none, 1: drawing W, 2: drawing D
-let p_w1 = null, p_w2 = null, p_d1 = null, p_d2 = null;
+let drawState = 0; // 0: none, 1: drawing W, 2: drawing D, 3: drawing H
+let p_w1 = null, p_w2 = null, p_d1 = null, p_d2 = null, p_h1 = null, p_h2 = null;
 
 // ------------------------------------------------------------------
 // 1. 初始化介面與 GPS API
@@ -855,7 +855,7 @@ function getIntersection(a1, a2, b1, b2) {
     return { x: ix, y: iy };
 }
 
-function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
+function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     if (!photoGroup || !photoCamera) return;
 
     // 1. 取得交點 (Anchor)
@@ -881,28 +881,40 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
     let dLen = Math.hypot(vd.x, vd.y);
     if (wLen < 5) return;
 
-    // 3. 計算 Yaw 角度 (利用純比例解法，不依賴可能失敗的 3D 相機 Pitch 射線投影)
+    // 3. 計算 Yaw 角度 (利用純比例解法)
     let tanYaw = (dLen * currentRealWidth) / (wLen * currentRealDepth);
     let yawAbs = Math.atan(tanYaw);
-    yawAbs = Math.min(yawAbs, Math.PI * 80 / 180); // 鎖死最大 80 度，絕對不允許背面朝著攝影機
+    yawAbs = Math.min(yawAbs, Math.PI * 80 / 180); // 鎖死最大 80 度
 
-    // 4. 方向判定與基準點切換
-    // 在螢幕座標上(Y向下)，如果深度線向左 (vd.x < 0)，代表我們看見機台左側面，
+    // 4. 由高度線先判斷 Roll (Z軸滾轉)，解析機台真正的向上方向
+    // ph1 為機台底部點，ph2 為機台頂部點。向量由下往上 (ph2 - ph1)
+    let vh = { x: ph2.x - ph1.x, y: ph2.y - ph1.y };
+    let rollAngle = 0;
+    if (Math.hypot(vh.x, vh.y) > 10) {
+        // 因螢幕座標 Y 是向下的，先把 vh.y 加上負號換算成正常直角座標系
+        rollAngle = Math.atan2(-vh.y, vh.x) - Math.PI / 2;
+    }
+
+    // 5. 反旋轉 2D 螢幕向量，還原至「直立座標系」以辨識左右側
+    let cosR = Math.cos(-rollAngle);
+    let sinR = Math.sin(-rollAngle);
+    // 屏座標：X右、Y下。映射至數學系 (x, -y)，然後進行 -rollAngle 旋轉取 X 分量
+    let vd_mathX = vd.x * cosR - (-vd.y) * sinR;
+
+    // 6. 方向判定與基準點切換
+    // 在反轉回直立座標系後，若深度線向左 (vd_mathX < 0)，代表我們看見機台左側面，
     // 這意味著相機在左前方，機台 Yaw 應朝向右 (Yaw > 0)
     // 同時這代表最靠近我們的角是左前角 (isFrontRight = false)
-    let isFrontRight = (vd.x > 0);
+    let isFrontRight = (vd_mathX > 0);
     let yaw = isFrontRight ? -yawAbs : yawAbs;
-    if (Math.abs(vd.x) < 5) {
+    if (Math.abs(vd_mathX) < 5) {
         yaw = 0;
         isFrontRight = false; // 正面無偏角
     }
 
-    // 保留使用者可能的 Z 軸旋轉 (例如雙指旋轉)
-    let currentZ = photoGroup.rotation.z;
-    photoGroup.rotation.set(0, yaw, 0); // 先應用 Y
-    photoGroup.rotateZ(currentZ); // 再補回 Z
+    photoGroup.rotation.set(0, yaw, rollAngle); 
 
-    // 5. 換算縮放
+    // 6. 換算縮放
     let visibleHeight = 2 * photoCamera.position.z * Math.tan(THREE.MathUtils.degToRad(photoCamera.fov / 2));
     let pixPerMeter = window.innerHeight / visibleHeight;
     let cosYaw = Math.cos(yaw);
@@ -949,6 +961,9 @@ function handlePointerDown(e) {
         } else if (drawState === 2) {
             p_d1 = p; p_d2 = p;
             updateLineSVG('line-depth', p_d1, p_d2);
+        } else if (drawState === 3) {
+            p_h1 = p; p_h2 = p;
+            updateLineSVG('line-height', p_h1, p_h2);
         }
         isDragging = true;
         if (e.cancelable) e.preventDefault();
@@ -981,6 +996,9 @@ function handlePointerMove(e) {
         } else if (drawState === 2) {
             p_d2 = p;
             updateLineSVG('line-depth', p_d1, p_d2);
+        } else if (drawState === 3) {
+            p_h2 = p;
+            updateLineSVG('line-height', p_h1, p_h2);
         }
         return;
     }
@@ -1027,16 +1045,23 @@ function handlePointerUp(e) {
                 return; 
             }
             drawState = 2;
-            document.getElementById('perspective-hint').textContent = '請畫出機台側面的【深度線】(兩條線若沒碰在一起會自動延伸計算交點)';
+            document.getElementById('perspective-hint').textContent = '請畫出機台側面的【深度線】(若沒碰在一起會自動延伸)';
         } else if (drawState === 2) {
             if (Math.hypot(p_d2.x - p_d1.x, p_d2.y - p_d1.y) < 20) {
                 document.getElementById('line-depth').setAttribute('visibility', 'hidden');
                 return;
             }
+            drawState = 3;
+            document.getElementById('perspective-hint').textContent = '請由下往上畫出機台【高度線】(辨識傾斜用)';
+        } else if (drawState === 3) {
+            if (Math.hypot(p_h2.x - p_h1.x, p_h2.y - p_h1.y) < 20) {
+                document.getElementById('line-height').setAttribute('visibility', 'hidden');
+                return;
+            }
             document.getElementById('perspective-hint').classList.add('hidden');
             
-            // 執行運算與轉換 (交點作為 Anchor，自動投射)
-            applyPerspectiveTransform(p_w1, p_w2, p_d1, p_d2);
+            // 執行運算與轉換
+            applyPerspectiveTransform(p_w1, p_w2, p_d1, p_d2, p_h1, p_h2);
             
             // 完成後自動切換回移動模式
             const btnMove = document.getElementById('btn-mode-move');
