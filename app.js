@@ -18,8 +18,9 @@ let placedBillboards = []; // 存放已放置的機台
 // 透視畫線全域變數
 let currentRealWidth = 1;
 let currentRealDepth = 1;
-let drawState = 0; // 0: none, 1: drawing W, 2: drawing D
-let p_w1, p_w2, p_d1, p_d2;
+let drawState = 0; // 0: none, 1: drawing W, 2: drawing D, 3: drawing H
+let anchor_O = {x:0, y:0};
+let vec_w = {x:0, y:0}, vec_d = {x:0, y:0}, vec_h = {x:0, y:0};
 
 // ------------------------------------------------------------------
 // 1. 初始化介面與 GPS API
@@ -706,11 +707,12 @@ function startCommonARMode() {
         // 如果退出畫線透視模式，隱藏提示與輔助線
         if (mode !== 'perspective') {
             drawState = 0;
-            const lw = document.getElementById('line-width');
-            const ld = document.getElementById('line-depth');
+            const ids = ['line-width', 'line-depth', 'line-height', 'draw-anchor'];
+            ids.forEach(id => {
+                let el = document.getElementById(id);
+                if (el) el.setAttribute('visibility', 'hidden');
+            });
             const hint = document.getElementById('perspective-hint');
-            if (lw) lw.setAttribute('visibility', 'hidden');
-            if (ld) ld.setAttribute('visibility', 'hidden');
             if (hint) hint.classList.add('hidden');
         }
     }
@@ -727,7 +729,7 @@ function startCommonARMode() {
                 drawState = 1;
                 const hint = document.getElementById('perspective-hint');
                 if (hint) {
-                    hint.textContent = '請在畫面上畫出機台正面底部寬距 (←左右→)';
+                    hint.textContent = '請在機台底部某一角落，拖曳出【寬度線】(例如向右拉)';
                     hint.classList.remove('hidden');
                 }
             }
@@ -865,14 +867,16 @@ function updateLineSVG(id, p1, p2) {
     line.setAttribute('visibility', 'visible');
 }
 
-function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
+function applyPerspectiveTransform(vw, vd, vh, anchor_O) {
     if (!photoGroup || !photoCamera) return;
 
     // 將像素向量轉換為 Three.js 螢幕座標 (Y需反向)
-    let dwx = pw2.x - pw1.x;
-    let dwy = -(pw2.y - pw1.y); 
-    let ddx = pd2.x - pd1.x;
-    let ddy = -(pd2.y - pd1.y);
+    let dwx = vw.x;
+    let dwy = -vw.y; 
+    let ddx = vd.x;
+    let ddy = -vd.y;
+    let dhx = vh.x;
+    let dhy = -vh.y;
 
     let ux = dwx / currentRealWidth;
     let uy = dwy / currentRealWidth;
@@ -890,6 +894,17 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
     let Vz = new THREE.Vector3(-vx, -vy, z2);
     let Vy = new THREE.Vector3().crossVectors(Vz, Vx);
 
+    // Necker Cube 反轉檢查：確認 Y 軸與用戶所畫的高度線 (vh) 同向
+    // 若相乘為負數，表示解出的法向量剛好顛倒，翻轉之。
+    let dotY = Vy.x * dhx + Vy.y * dhy;
+    if (dotY < 0) {
+        z1 = -z1;
+        z2 = -z2;
+        Vx.z = z1;
+        Vz.z = z2;
+        Vy.crossVectors(Vz, Vx); // 重新計算
+    }
+
     let S = Vx.length();
     if (S === 0) return;
 
@@ -899,21 +914,19 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
 
     let R = new THREE.Matrix4().makeBasis(Vx, Vy, Vz);
 
-    // 套用計算出來的 3D 旋轉矩陣 (轉換為 Quaternion)
+    // 套用計算出來的 3D 旋轉矩陣
     photoGroup.quaternion.setFromRotationMatrix(R);
 
-    // 換算縮放 (從輔助線像素長度轉換至 3D 空間網格比例)
+    // 換算縮放
     let visibleHeightMeters = 2 * photoCamera.position.z * Math.tan( THREE.MathUtils.degToRad( photoCamera.fov / 2 ) );
     let pixelsPerMeter = window.innerHeight / visibleHeightMeters;
     let modelScale = S / pixelsPerMeter;
     
     photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    // 重新置中輔助定位，以兩條線的中心為基準點
-    let cx = (pw1.x + pw2.x + pd1.x + pd2.x) / 4;
-    let cy = (pw1.y + pw2.y + pd1.y + pd2.y) / 4;
-    let ndcX = (cx / window.innerWidth) * 2 - 1;
-    let ndcY = -(cy / window.innerHeight) * 2 + 1;
+    // 將所點選的 anchor_O 解析為 3D 世界座標的射線著陸點
+    let ndcX = (anchor_O.x / window.innerWidth) * 2 - 1;
+    let ndcY = -(anchor_O.y / window.innerHeight) * 2 + 1;
     
     let targetPos = new THREE.Vector3(ndcX, ndcY, 0.5);
     targetPos.unproject(photoCamera);
@@ -921,7 +934,12 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
     let distance = photoCamera.position.z; 
     let finalPos = photoCamera.position.clone().add(dir.multiplyScalar(distance));
     
-    photoGroup.position.copy(finalPos);
+    // 計算群組在 Local Space 的左前底角 (對應使用者起手畫的第一個點)
+    let localCorner = new THREE.Vector3(-currentRealWidth / 2, -1, 1);
+    let worldOffset = localCorner.multiplyScalar(modelScale).applyQuaternion(photoGroup.quaternion);
+    
+    // 令群組的左前底角直接與使用者所點選的 anchor_O 對齊
+    photoGroup.position.copy(finalPos).sub(worldOffset);
 }
 
 // ----------------------------------------------------
@@ -933,11 +951,23 @@ function handlePointerDown(e) {
     if (interactionMode === 'perspective') {
         const p = getEventCoords(e);
         if (drawState === 1) {
-            p_w1 = p; p_w2 = p;
-            updateLineSVG('line-width', p_w1, p_w2);
+            anchor_O = p;
+            vec_w = {x: 0, y: 0};
+            updateLineSVG('line-width', anchor_O, anchor_O);
+            let anchorEl = document.getElementById('draw-anchor');
+            if (anchorEl) {
+                anchorEl.setAttribute('cx', anchor_O.x);
+                anchorEl.setAttribute('cy', anchor_O.y);
+                anchorEl.setAttribute('visibility', 'visible');
+            }
         } else if (drawState === 2) {
-            p_d1 = p; p_d2 = p;
-            updateLineSVG('line-depth', p_d1, p_d2);
+            previousMousePosition = p; // 記住起點，讓使用者到處滑都行
+            vec_d = {x: 0, y: 0};
+            updateLineSVG('line-depth', anchor_O, anchor_O);
+        } else if (drawState === 3) {
+            previousMousePosition = p;
+            vec_h = {x: 0, y: 0};
+            updateLineSVG('line-height', anchor_O, anchor_O);
         }
         isDragging = true;
         if (e.cancelable) e.preventDefault();
@@ -965,9 +995,16 @@ function handlePointerMove(e) {
         if (e.cancelable) e.preventDefault();
         const p = getEventCoords(e);
         if (drawState === 1) {
-            p_w2 = p; updateLineSVG('line-width', p_w1, p_w2);
+            vec_w = { x: p.x - anchor_O.x, y: p.y - anchor_O.y };
+            updateLineSVG('line-width', anchor_O, p);
         } else if (drawState === 2) {
-            p_d2 = p; updateLineSVG('line-depth', p_d1, p_d2);
+            let delta = { x: p.x - previousMousePosition.x, y: p.y - previousMousePosition.y };
+            vec_d = delta;
+            updateLineSVG('line-depth', anchor_O, { x: anchor_O.x + delta.x, y: anchor_O.y + delta.y });
+        } else if (drawState === 3) {
+            let delta = { x: p.x - previousMousePosition.x, y: p.y - previousMousePosition.y };
+            vec_h = delta;
+            updateLineSVG('line-height', anchor_O, { x: anchor_O.x + delta.x, y: anchor_O.y + delta.y });
         }
         return;
     }
@@ -1009,21 +1046,30 @@ function handlePointerUp(e) {
     if (interactionMode === 'perspective' && isDragging) {
         isDragging = false;
         if (drawState === 1) {
-            if (Math.hypot(p_w2.x - p_w1.x, p_w2.y - p_w1.y) < 20) {
+            if (Math.hypot(vec_w.x, vec_w.y) < 20) {
                 document.getElementById('line-width').setAttribute('visibility', 'hidden');
-                return; // 畫太短，忽略這次操作
+                let a = document.getElementById('draw-anchor');
+                if(a) a.setAttribute('visibility', 'hidden');
+                return; 
             }
             drawState = 2;
-            document.getElementById('perspective-hint').textContent = '請接著畫出機台側面底部深度線 (↙前後↗)';
+            document.getElementById('perspective-hint').textContent = '請在畫面任意處拖曳，畫出【側向深度線】(例如向左後拉)';
         } else if (drawState === 2) {
-            if (Math.hypot(p_d2.x - p_d1.x, p_d2.y - p_d1.y) < 20) {
+            if (Math.hypot(vec_d.x, vec_d.y) < 20) {
                 document.getElementById('line-depth').setAttribute('visibility', 'hidden');
+                return;
+            }
+            drawState = 3;
+            document.getElementById('perspective-hint').textContent = '最後，請拖曳畫出【垂直高度線】(代表機體往上延伸的方向)';
+        } else if (drawState === 3) {
+            if (Math.hypot(vec_h.x, vec_h.y) < 20) {
+                document.getElementById('line-height').setAttribute('visibility', 'hidden');
                 return;
             }
             document.getElementById('perspective-hint').classList.add('hidden');
             
             // 執行核心運算與轉換
-            applyPerspectiveTransform(p_w1, p_w2, p_d1, p_d2);
+            applyPerspectiveTransform(vec_w, vec_d, vec_h, anchor_O);
             
             // 完成後自動切換回移動模式
             const btnMove = document.getElementById('btn-mode-move');

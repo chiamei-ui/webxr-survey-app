@@ -165,10 +165,12 @@
     <svg id="draw-svg" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 60;">
       <line id="line-width" stroke="#ffff00" stroke-width="4" stroke-dasharray="6,6" stroke-linecap="round" visibility="hidden" />
       <line id="line-depth" stroke="#00ffff" stroke-width="4" stroke-dasharray="6,6" stroke-linecap="round" visibility="hidden" />
+      <line id="line-height" stroke="#00ff00" stroke-width="4" stroke-dasharray="6,6" stroke-linecap="round" visibility="hidden" />
+      <circle id="draw-anchor" r="6" fill="#ffffff" visibility="hidden" />
     </svg>
     
     <!-- 透視畫線操作提示 -->
-    <div id="perspective-hint" class="hint-toast hidden">請在螢幕上畫出機台底部寬度線 (←左右→)</div>
+    <div id="perspective-hint" class="hint-toast hidden">請在機台底部某一角落，拖曳出【寬度線】(例如向右拉)</div>
 
     <!-- 這裡會用 Three.js 在背後繪製圖片與機台 -->
     <div id="photo-watermark-preview" class="watermark-overlay">
