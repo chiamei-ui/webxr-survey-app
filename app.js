@@ -870,21 +870,34 @@ function updateLineSVG(id, p1, p2) {
 function applyPerspectiveTransform(vw, vd, anchorPt) {
     if (!photoGroup || !photoCamera) return;
 
-    // --- 純 Yaw 旋轉：Y 軸永遠垂直螢幕 ---
+    // ===============================================================
+    // 純 Yaw 旋轉：Y 軸永遠垂直螢幕、正面永遠朝向相機
+    // ===============================================================
     let wLen = Math.hypot(vw.x, vw.y);
     let dLen = Math.hypot(vd.x, vd.y);
     if (wLen < 5) return;
 
-    // 2D 叉積決定旋轉方向 (螢幕座標，Y 向下)
-    // cross > 0 → 深度線在寬度線「順時針」側 → 機台斜右
-    // cross < 0 → 深度線在寬度線「逆時針」側 → 機台斜左
-    let cross2D = vw.x * vd.y - vw.y * vd.x;
+    // --- 方向判定 ---
+    // 只看深度線的 X 分量，不依賴寬度線畫法方向：
+    //   vd.x < 0 → 深度線向左 → 看到左側面 → 正面偏右 → yaw > 0 (CCW from top)
+    //   vd.x > 0 → 深度線向右 → 看到右側面 → 正面偏左 → yaw < 0 (CW from top)
+    //   vd.x ≈ 0 → 正面直視，yaw ≈ 0
 
-    // Yaw 角度 = atan( (dLen / realDepth) / (wLen / realWidth) )
-    let yawAbs = Math.atan2(dLen / currentRealDepth, wLen / currentRealWidth);
-    let yaw = (cross2D < 0) ? yawAbs : -yawAbs;
+    // --- Yaw 大小 ---
+    // 透視公式：screenW = realW * cos(yaw), screenD = realD * sin(yaw)
+    // → tan(yaw) = (dLen * realW) / (wLen * realD)
+    let tanYaw = (dLen * currentRealWidth) / (wLen * currentRealDepth);
+    let yawAbs = Math.atan(tanYaw);
 
-    // 套用旋轉，只有 Y 軸旋轉，無 Pitch / Roll
+    // 限制 yaw 在 ±80° 以內（正面永遠面向相機，不會出現背面）
+    yawAbs = Math.min(yawAbs, Math.PI * 80 / 180);
+
+    let yaw = (vd.x < 0) ? yawAbs : -yawAbs;
+
+    // 如果深度線幾乎沒有水平分量，視為正面直視
+    if (Math.abs(vd.x) < 5) yaw = 0;
+
+    // 套用旋轉，只有 Y 軸旋轉
     photoGroup.rotation.set(0, yaw, 0);
 
     // --- 縮放 ---
@@ -892,14 +905,19 @@ function applyPerspectiveTransform(vw, vd, anchorPt) {
         Math.tan(THREE.MathUtils.degToRad(photoCamera.fov / 2));
     let pixPerMeter = window.innerHeight / visibleHeight;
     let cosYaw = Math.cos(yaw);
-    // 寬度線像素長度 = realWidth * |cos(yaw)| * scale * pixPerMeter
-    let modelScale = (Math.abs(cosYaw) > 0.01)
-        ? wLen / (currentRealWidth * Math.abs(cosYaw) * pixPerMeter)
-        : dLen / (currentRealDepth * Math.abs(Math.sin(yaw)) * pixPerMeter);
+
+    // 寬度線像素長度 ≈ realWidth * |cos(yaw)| * scale * pixPerMeter
+    let modelScale;
+    if (Math.abs(cosYaw) > 0.1) {
+        modelScale = wLen / (currentRealWidth * Math.abs(cosYaw) * pixPerMeter);
+    } else {
+        // 極端側面角度時改用深度線推算
+        modelScale = dLen / (currentRealDepth * Math.abs(Math.sin(yaw)) * pixPerMeter);
+    }
 
     photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    // --- 定位：原點角落對齊 anchor ---
+    // --- 定位：anchor 對齊機台底角 ---
     let ndcX = (anchorPt.x / window.innerWidth) * 2 - 1;
     let ndcY = -(anchorPt.y / window.innerHeight) * 2 + 1;
     let target = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
@@ -908,13 +926,17 @@ function applyPerspectiveTransform(vw, vd, anchorPt) {
         dir.multiplyScalar(photoCamera.position.z)
     );
 
-    // 機台底部左前角 (Local Space)
+    // 機台底部角落 (Local Space)
+    // rebuildModelGroup 中 position.y = -1, z = 1 - d/2 → 正面 z ≈ 1
+    // 群組的 local 原點在 (0, 0, 0)
+    // 底部前角最左點約在 (-totalW/2, -1, 1)
     let localCorner = new THREE.Vector3(-currentRealWidth / 2, -1, 1);
     let worldOffset = localCorner.clone().multiplyScalar(modelScale);
     worldOffset.applyEuler(new THREE.Euler(0, yaw, 0));
 
     photoGroup.position.copy(worldPos).sub(worldOffset);
 }
+
 
 // ----------------------------------------------------
 // 滑鼠與觸控共通處理邏輯
