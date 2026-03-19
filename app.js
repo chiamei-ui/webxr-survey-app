@@ -1,5 +1,5 @@
-import * as THREE from 'three';
-import { ARButton } from 'three/addons/webxr/ARButton.js';
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+import { ARButton } from 'https://unpkg.com/three@0.160.0/examples/jsm/webxr/ARButton.js';
 
 // ---- 全域狀態存放 ----
 let siteName = '未命名站點';
@@ -41,7 +41,7 @@ function rebuildModelGroup() {
         if (modelDef.d > maxDepth) maxDepth = modelDef.d;
         if (modelDef.hasCap && modelDef.capD > maxDepth) maxDepth = modelDef.capD;
     });
-    totalWidth += (selectedModels.length - 1) * 0.1;
+    totalWidth += (selectedModels.length - 1) * 10; // 每個機台間隔 10cm
     
     currentRealWidth = totalWidth || 1;
     currentRealDepth = maxDepth || 1;
@@ -52,7 +52,7 @@ function rebuildModelGroup() {
         const unitWidth = modelDef.w + (modelDef.hasCap ? modelDef.capW : 0);
         machine.position.set(currentX + modelDef.w / 2, -1, 1 - (modelDef.d / 2));
         photoGroup.add(machine);
-        currentX += unitWidth + 0.1;
+        currentX += unitWidth + 10; // 每個機台間隔 10cm
     });
 }
 
@@ -154,44 +154,67 @@ function initUI() {
         return true;
     }
 
-    // ---- 查看尺寸按鈕 ----
-    document.getElementById('btn-view-dimensions').addEventListener('click', () => {
-        const checkboxes = document.querySelectorAll('#model-list input.machine-check:checked');
-        if (checkboxes.length === 0) { alert("請先勾選您想查詢的機台！"); return; }
+    // ---- 查看尺寸按鈕 (使用對話框) ----
+    const dimModal = document.getElementById('dimensions-modal');
+    const btnViewDims = document.getElementById('btn-view-dimensions');
+    const btnCloseDims = document.getElementById('btn-close-dimensions');
+    const dimsList = document.getElementById('dimensions-list');
 
-        let msg = "您選擇的機台尺寸如下 (單位: cm)：\n\n";
-        let totalW = 0, maxD = 0;
-        const spacing = 10;
+    function updateDimensionsModal() {
+        if (!dimsList || !prepareModels()) return;
+        dimsList.innerHTML = '';
+        
+        let totalW = 0;
+        // selectedModels 的長寬高現在是公尺 (0.85)，顯示時要轉回公分 (*100)
+        selectedModels.forEach((model, index) => {
+            const item = document.createElement('div');
+            item.className = 'dimension-item';
+            
+            const realW = Math.round(model.w * 100);
+            const realH = Math.round(model.h * 100);
+            const realD = Math.round(model.d * 100);
+            
+            const unitW = realW + (model.hasCap ? Math.round(model.capW * 100) : 0);
+            totalW += unitW;
+            if (index < selectedModels.length - 1) totalW += 10; // 建議間距 10cm
 
-        Array.from(checkboxes).forEach((cb, index) => {
-            const name = cb.parentElement.textContent.trim();
-            const w = parseFloat(cb.dataset.w);
-            const h = parseFloat(cb.dataset.h);
-            const d = parseFloat(cb.dataset.d || "50");
-            let cUnitW = w, cUnitD = d;
-
-            msg += `• [${name}]: ${w} x ${d} x ${h}\n`;
-
-            const capCb = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
-            if (capCb && capCb.checked && cb.dataset.capW) {
-                const cw = parseFloat(cb.dataset.capW);
-                const cd = parseFloat(cb.dataset.capD);
-                const ch = parseFloat(cb.dataset.capH);
-                msg += `  ↳ (+ 瓶蓋箱): ${cw} x ${cd} x ${ch}\n`;
-                cUnitW += cw;
-                if (cd > cUnitD) cUnitD = cd;
+            let details = `<span class="dim-name">${index + 1}. [${model.color}] 機台</span>`;
+            details += `<div class="dim-values">寬 ${realW} x 高 ${realH} x 深 ${realD} cm</div>`;
+            if (model.hasCap) {
+                const cw = Math.round(model.capW * 100);
+                const ch = Math.round(model.capH * 100);
+                const cd = Math.round(model.capD * 100);
+                details += `<div class="dim-values" style="font-size:0.85em; color:#666;">└ 配件: 寬 ${cw} x 高 ${ch} x 深 ${cd} cm</div>`;
             }
-            totalW += cUnitW;
-            if (cUnitD > maxD) maxD = cUnitD;
-            if (index < checkboxes.length - 1) totalW += spacing;
+            
+            item.innerHTML = details;
+            dimsList.appendChild(item);
         });
 
-        msg += `\n----------------------\n`;
-        msg += `📏 預估佔用總寬度: ${totalW.toFixed(1)} cm (含 10cm 間隙)\n`;
-        msg += `📐 預估最大進深: ${maxD.toFixed(1)} cm\n`;
-        alert(msg);
-    });
+        if (selectedModels.length > 1) {
+            const totalDiv = document.createElement('div');
+            totalDiv.className = 'dim-total';
+            totalDiv.innerHTML = `
+                <div class="dim-total-label">總標記寬度 (含 10cm 間距):</div>
+                <div class="dim-total-val">${totalW.toFixed(0)} cm</div>
+            `;
+            dimsList.appendChild(totalDiv);
+        }
+        return true;
+    }
 
+    if (btnViewDims) {
+        btnViewDims.onclick = () => {
+            if (updateDimensionsModal()) {
+                dimModal.classList.remove('hidden');
+            }
+        };
+    }
+    if (btnCloseDims) {
+        btnCloseDims.onclick = () => {
+            dimModal.classList.add('hidden');
+        };
+    }
     // ---- 匯入舊照 (手機版直接 click file input) ----
     document.getElementById('btn-photo-import').addEventListener('click', () => {
         if (prepareModels()) {

@@ -447,4 +447,100 @@ input[type="text"] {
     height: 45px;
   }
 }
+
+/* ---------------------------------------------------- */
+/* 機台尺寸查看對話框樣式 */
+/* ---------------------------------------------------- */
+.overlay {
+  position: fixed;
+  top: 0; left: 0; width: 100vw; height: 100vh;
+  background: rgba(0,0,0,0.7);
+  display: flex; justify-content: center; align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 24px;
+  border-radius: 18px;
+  width: 88%;
+  max-width: 380px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content h3 {
+  margin-top: 0;
+  color: #222;
+  border-bottom: 3px solid #f0f0f0;
+  padding-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#dimensions-list {
+  margin: 10px 0;
+}
+
+.dimension-item {
+  padding: 14px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.dimension-item:last-child {
+  border-bottom: none;
+}
+
+.dim-name {
+  font-weight: 700;
+  color: #444;
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.95rem;
+}
+
+.dim-values {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 1.15rem;
+  font-weight: bold;
+  color: #007bff;
+}
+
+.dim-total {
+  margin-top: 15px;
+  padding: 12px;
+  background: #eef9f1;
+  border-radius: 10px;
+  border-left: 5px solid #28a745;
+}
+
+.dim-total-label {
+  font-weight: bold;
+  color: #155724;
+  font-size: 0.9rem;
+}
+
+.dim-total-val {
+  font-size: 1.3rem;
+  font-weight: 900;
+  color: #1e7e34;
+  font-family: monospace;
+}
+
+.modal-footer {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-footer p {
+  color: #888;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
 

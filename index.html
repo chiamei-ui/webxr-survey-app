@@ -194,7 +194,7 @@
     </div>
 
     <div class="bottom-right-tools">
-      <button id="btn-mode-perspective" class="tool-btn highlight" style="background-color:#9c27b0; border-color:#e1bee7;">📐 透視畫線</button>
+      <button id="btn-mode-perspective" class="tool-btn highlight" style="background-color:#9c27b0; border-color:#e1bee7;">📐 透視畫線<br><small style="font-size:0.7em;opacity:0.85;">(優化中)</small></button>
     </div>
 
     <div class="bottom-bar">
@@ -234,7 +234,19 @@
     </div>
   </div>
   <!-- 原生 HTML 圖片畫布 (永遠放在最底層) -->
-  <img id="native-photo-bg" crossorigin="anonymous" class="hidden">
+  <!-- 第 4 層: 機台尺寸查看對話框 -->
+  <div id="dimensions-modal" class="overlay hidden">
+    <div class="modal-content">
+      <h3>📏 目前選取機台尺寸</h3>
+      <div id="dimensions-list">
+        <!-- 這裡會由 JS 動態填入 -->
+      </div>
+      <div class="modal-footer">
+        <p style="color: #666; font-size: 0.8em; margin-bottom: 10px;">* 請依此尺寸拉開捲尺，以利後續透視畫線對準。</p>
+        <button id="btn-close-dimensions" class="action-btn">確認</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>
