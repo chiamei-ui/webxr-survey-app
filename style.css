@@ -451,12 +451,13 @@ input[type="text"] {
 /* ---------------------------------------------------- */
 /* 機台尺寸查看對話框樣式 */
 /* ---------------------------------------------------- */
-.overlay {
+#dimensions-modal {
   position: fixed;
   top: 0; left: 0; width: 100vw; height: 100vh;
   background: rgba(0,0,0,0.7);
   display: flex; justify-content: center; align-items: center;
   z-index: 1000;
+  pointer-events: auto;
 }
 
 .modal-content {

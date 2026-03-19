@@ -41,7 +41,7 @@ function rebuildModelGroup() {
         if (modelDef.d > maxDepth) maxDepth = modelDef.d;
         if (modelDef.hasCap && modelDef.capD > maxDepth) maxDepth = modelDef.capD;
     });
-    totalWidth += (selectedModels.length - 1) * 10; // 每個機台間隔 10cm
+    totalWidth += (selectedModels.length - 1) * 0.1; // 每個機台間隔 10cm (0.1m)
     
     currentRealWidth = totalWidth || 1;
     currentRealDepth = maxDepth || 1;
@@ -52,7 +52,7 @@ function rebuildModelGroup() {
         const unitWidth = modelDef.w + (modelDef.hasCap ? modelDef.capW : 0);
         machine.position.set(currentX + modelDef.w / 2, -1, 1 - (modelDef.d / 2));
         photoGroup.add(machine);
-        currentX += unitWidth + 10; // 每個機台間隔 10cm
+        currentX += unitWidth + 0.1; // 每個機台間隔 10cm (0.1m)
     });
 }
 
