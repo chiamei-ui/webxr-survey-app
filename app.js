@@ -943,9 +943,12 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
     // 如果使用者是由前緣往後畫深度線，則 dirZ 代表 -Z 方向。
     // 因此 finalZ 應該與 dirZ 夾角大於 90 度 (內積 < 0)。
     // 如果內積 > 0，代表我們找出的正面其實朝向相機背後，我們應將其旋轉 180 度。
+    // 同時這也意味著使用者是從右前角 (Front-Right) 作為交點。
+    let isFrontRight = false;
     if (finalZ.dot(dirZ) > 0) {
         finalZ.negate();
         dirX.negate(); // 必須一起反向以維持右手系 (Y 不動)
+        isFrontRight = true;
     }
 
     // 更新機台角度
@@ -958,13 +961,15 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
     let scale = dist3D / currentRealWidth;
     photoGroup.scale.set(scale, scale, scale);
 
-    // --- 計算位置 (讓 P1 與機台的左前方底角對齊) ---
+    // --- 計算位置 (自動對齊左右角) ---
     // 預設 rebuildModelGroup 將機台置中於 (0,0,0)，底部前緣在 Z=1, Y=-1, X 範圍 -W/2 ~ W/2
-    // 對於一排機台，左前底角在 (-totalWidth/2, -1, 1)
-    let localCorner = new THREE.Vector3(-currentRealWidth / 2, -1, 1);
+    // 如果交點在左側 (isFrontRight=false)，對齊 -totalWidth/2
+    // 如果交點在右側 (isFrontRight=true)，對齊 +totalWidth/2
+    let cornerX = isFrontRight ? (currentRealWidth / 2) : (-currentRealWidth / 2);
+    let localCorner = new THREE.Vector3(cornerX, -1, 1);
     let worldOffset = localCorner.clone().multiplyScalar(scale).applyQuaternion(photoGroup.quaternion);
 
-    // 令群組的「左前底角位置」等於我們投影出的世界點 P1
+    // 令群組的「前底角位置」等於我們投影出的世界點 P1
     photoGroup.position.copy(P1).sub(worldOffset);
 }
 
