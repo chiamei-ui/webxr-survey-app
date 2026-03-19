@@ -884,7 +884,8 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     // 3. 計算 Yaw 角度 (利用純比例解法)
     let tanYaw = (dLen * currentRealWidth) / (wLen * currentRealDepth);
     let yawAbs = Math.atan(tanYaw);
-    yawAbs = Math.min(yawAbs, Math.PI * 80 / 180); // 鎖死最大 80 度
+    // 依據使用者要求：保持機台 Yaw 只有 0 度或 90 度，不允許其他微小斜角！
+    yawAbs = Math.round(yawAbs / (Math.PI / 2)) * (Math.PI / 2);
 
     // 4. 由高度線先判斷 Roll (Z軸滾轉)，解析機台真正的向上方向
     // ph1 為機台底部點，ph2 為機台頂部點。向量由下往上 (ph2 - ph1)
@@ -933,7 +934,11 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     let ndcY = -(anchor_O.y / window.innerHeight) * 2 + 1;
     let targetPos = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
     let dir = targetPos.sub(photoCamera.position).normalize();
-    let worldPos = photoCamera.position.clone().add(dir.multiplyScalar(photoCamera.position.z));
+    
+    // 精確求出相機射線與 Z=0 平面的交點。
+    // photoCamera 位於 (0, 0, 5)，射線方向 dir.z 必定為負。
+    let t = -photoCamera.position.z / dir.z;
+    let worldPos = photoCamera.position.clone().add(dir.multiplyScalar(t));
 
     // 計算群組在 Local Space 的偏移量
     // 如果 Anchor 在右側，綁定位置至 +totalWidth/2
