@@ -875,8 +875,7 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     updateLineSVG('line-width', anchor_O, pW);
     updateLineSVG('line-depth', anchor_O, pD);
 
-    let wLen = Math.hypot(pW.x - anchor_O.x, pW.y - anchor_O.y);
-    if (wLen < 5) return;
+    // wLen 改在步驟3計算（用 pw1/pw2 全長）
 
     // 2. 由高度線判斷手機方向 → 鎖定 Y=0（直向）或 Y=90（橫向）
     let vh = { x: ph2.x - ph1.x, y: ph2.y - ph1.y };
@@ -887,30 +886,47 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     }
     photoGroup.rotation.set(0, yaw, 0);
 
-    // 3. 將寬度線的「兩個端點」各自投射到 3D Z=0 平面
-    //    w3D_A 對應 pw1（左端或右端），w3D_B 對應 pw2（另一端）
-    //    這樣機台前底邊兩個角落就會精確落在兩端點，讓底部寬度完整對齊黃線！
-    function screenTo3D(p) {
-        let ndcX = (p.x / window.innerWidth) * 2 - 1;
-        let ndcY = -(p.y / window.innerHeight) * 2 + 1;
-        let vec = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
-        let dir = vec.sub(photoCamera.position).normalize();
-        let tt = -photoCamera.position.z / dir.z;
-        return photoCamera.position.clone().addScaledVector(dir, tt);
-    }
+    // 3. 計算螢幕像素/3D 單位換算比 (基於相機 FOV 與距離)
+    // 相機坐標系：camera 在 (0,0,8)，FOV=70，正面 front 在 Z=0（group Z=0，local front Z=1→world Z=0）
+    // 機台前面的世界 Z = group.position.z + 1*scale ≒ 0
+    // 所以我們假設前面在 z=0，算出正確的世界尺寸
+    let fovRad = THREE.MathUtils.degToRad(photoCamera.fov);
+    let cameraZ = photoCamera.position.z; // =8
+    let frontZ = 0;                       // 機台前面假設放在世界 Z=0
+    let distToFront = cameraZ - frontZ;   // =8
 
-    let w3D_A = screenTo3D(pw1);  // 前底 角落 A
-    let w3D_B = screenTo3D(pw2);  // 前底 角落 B
+    // 螢幕高度對應 3D 世界高度 (在 frontZ 平面)
+    let worldHeightAtFront = 2 * distToFront * Math.tan(fovRad / 2);
+    let pixPerUnit = window.innerHeight / worldHeightAtFront; // 像素/3D 單位
 
-    // 4. 縮放：兩角落在 3D 中的距離 ÷ 機台實際線寬
-    let dist3D = w3D_A.distanceTo(w3D_B);
-    let modelScale = dist3D / currentRealWidth;
+    // 寬度線的完整螢幕像素長度（pw1 到 pw2）
+    let wLen = Math.hypot(pw2.x - pw1.x, pw2.y - pw1.y);
+    if (wLen < 5) return;
+
+    // 3D 縮放 = 像素長度 ÷ 像素/單位 ÷ 機台實際寬度
+    let modelScale = (wLen / pixPerUnit) / currentRealWidth;
     photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    // 5. 機台中心 = 兩角落中點 (=前底中心)，再往後退 front face Z 偏移
-    let frontBottomCenter = new THREE.Vector3().addVectors(w3D_A, w3D_B).multiplyScalar(0.5);
+    // 4. 寬度線中點的螢幕位置 → 對應 3D 世界座標 (在 frontZ 平面)
+    let midScreen = { x: (pw1.x + pw2.x) / 2, y: (pw1.y + pw2.y) / 2 };
+    
+    function screenToWorld(p, worldZ) {
+        let ndcX = (p.x / window.innerWidth) * 2 - 1;
+        let ndcY = -(p.y / window.innerHeight) * 2 + 1;
+        // 透視投影：worldX = ndcX * distToTarget * tan(fovH/2)
+        let aspect = window.innerWidth / window.innerHeight;
+        let halfFovH = Math.atan(Math.tan(fovRad / 2) * aspect);
+        let dist = cameraZ - worldZ;
+        let wx = ndcX * dist * Math.tan(halfFovH);
+        let wy = ndcY * dist * Math.tan(fovRad / 2);
+        return new THREE.Vector3(wx, wy, worldZ);
+    }
 
-    // 將 front face 的 local 中心 (0, -1, 1) 偏移轉到世界空間
+    // 前底中心的世界位置 (frontZ=0 平面)
+    let frontBottomCenter = screenToWorld(midScreen, frontZ);
+
+    // 5. 機台 group 中心 = 前底中心 − localFrontBottom * scale
+    //    localFrontBottom = (0, -1, 1)：front face 底部在 group local 的位置
     let localFrontBottom = new THREE.Vector3(0, -1, 1);
     let worldFrontOffset = localFrontBottom.clone().multiplyScalar(modelScale)
         .applyQuaternion(photoGroup.quaternion);
