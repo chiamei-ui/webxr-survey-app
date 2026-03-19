@@ -884,18 +884,38 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     // 3. 計算 Yaw 角度 (利用純比例解法)
     let tanYaw = (dLen * currentRealWidth) / (wLen * currentRealDepth);
     let yawAbs = Math.atan(tanYaw);
+    
     // 依據使用者要求：保持機台 Yaw 只有 0 度或 90 度，不允許其他微小斜角！
-    yawAbs = Math.round(yawAbs / (Math.PI / 2)) * (Math.PI / 2);
+    if (yawAbs < Math.PI / 4) {
+        yawAbs = 0;
+    } else {
+        yawAbs = Math.PI / 2;
+    }
 
-    // 4. 由高度線先判斷 Roll (Z軸滾轉)，解析機台真正的向上方向
-    // ph1 為機台底部點，ph2 為機台頂部點。向量由下往上 (ph2 - ph1)
+    // 4. 解析機台真正的 Roll (Z軸滾轉) 確保正面寬度位置貼齊！
     let vh = { x: ph2.x - ph1.x, y: ph2.y - ph1.y };
     let rollAngle = 0;
-    if (Math.hypot(vh.x, vh.y) > 10) {
-        // 因螢幕座標 Y 是向下的，先把 vh.y 加上負號換算成正常直角座標系
-        rollAngle = Math.atan2(-vh.y, vh.x) - Math.PI / 2;
-        // 強制量化為 0, 90, 180, 270 (手機轉向只會有四種方位)
-        rollAngle = Math.round(rollAngle / (Math.PI / 2)) * (Math.PI / 2);
+    
+    if (yawAbs === 0) {
+        // 若判定為正面 (Yaw=0)，強制將 3D 機台的本體旋轉角度對齊使用者畫出的「寬度黃線 (vw)」
+        // 這樣正面底線就會 100% 像素級貼齊畫線！
+        let baseRoll = Math.atan2(-vw.y, vw.x);
+        let heightAngle = Math.atan2(-vh.y, vh.x);
+        let proposedYAngle = baseRoll + Math.PI / 2;
+        let diff = heightAngle - proposedYAngle;
+        
+        // 正規化角度差至 [-PI, PI] 來判定是否畫上下顛倒 (-180度)
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        if (Math.abs(diff) > Math.PI / 2) {
+            baseRoll += Math.PI; // 顛倒修正
+        }
+        rollAngle = baseRoll;
+    } else {
+        // 若判定為純側面 (Yaw=90)，機台正面朝向 Z 軸深處，我們改以「高度線 (vh)」決定 Roll 確保機台直立
+        if (Math.hypot(vh.x, vh.y) > 10) {
+            rollAngle = Math.atan2(-vh.y, vh.x) - Math.PI / 2;
+        }
     }
 
     // 5. 反旋轉 2D 螢幕向量，還原至「直立座標系」以辨識左右側
@@ -905,9 +925,6 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     let vd_mathX = vd.x * cosR - (-vd.y) * sinR;
 
     // 6. 方向判定與基準點切換
-    // 在反轉回直立座標系後，若深度線向左 (vd_mathX < 0)，代表我們看見機台左側面，
-    // 這意味著相機在左前方，機台 Yaw 應朝向右 (Yaw > 0)
-    // 同時這代表最靠近我們的角是左前角 (isFrontRight = false)
     let isFrontRight = (vd_mathX > 0);
     let yaw = isFrontRight ? -yawAbs : yawAbs;
     if (Math.abs(vd_mathX) < 5) {
