@@ -8,7 +8,28 @@ html {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background-color: #000;
   color: #fff;
+  /* 鎖定頁面縮放：禁止瀏覽器因雙擊或捏合而縮放整個介面 */
+  touch-action: none;
+  -webkit-text-size-adjust: 100%;
+  user-select: none;
+  -webkit-user-select: none;
 }
+
+/* 所有按鈕加入 manipulation：允許按鈕單擊，但不允許雙擊縮放 */
+button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 輸入框恢復正常的文字選取，讓使用者可以正常輸入站點名稱 */
+input {
+  touch-action: manipulation;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 
 .overlay {
   position: fixed; /* 改為 fixed 避免 iOS Safari 計算誤差 */
@@ -289,6 +310,25 @@ input[type="text"] {
   display: flex;
   gap: 10px;
   justify-content: space-between;
+}
+
+/* 透視畫線提示 UI */
+.hint-toast {
+  position: absolute;
+  top: max(env(safe-area-inset-top, 20px), 20px);
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(156, 39, 176, 0.9); /* 紫色系 */
+  color: white;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-weight: bold;
+  font-size: 1rem;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  white-space: nowrap;
 }
 
 .tool-btn {

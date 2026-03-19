@@ -158,8 +158,17 @@
     </div>
   </div>
 
-  <!-- 第 2-B 層: 舊照合成 UI (新功能) -->
+    <!-- 第 2-B 層: 舊照合成 UI (新功能) -->
   <div id="photo-ar-ui" class="overlay hidden">
+
+    <!-- 畫線透視用 SVG 疊加層 -->
+    <svg id="draw-svg" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 60;">
+      <line id="line-width" stroke="#ffff00" stroke-width="4" stroke-dasharray="6,6" stroke-linecap="round" visibility="hidden" />
+      <line id="line-depth" stroke="#00ffff" stroke-width="4" stroke-dasharray="6,6" stroke-linecap="round" visibility="hidden" />
+    </svg>
+    
+    <!-- 透視畫線操作提示 -->
+    <div id="perspective-hint" class="hint-toast hidden">請在螢幕上畫出機台底部寬度線 (←左右→)</div>
 
     <!-- 這裡會用 Three.js 在背後繪製圖片與機台 -->
     <div id="photo-watermark-preview" class="watermark-overlay">
@@ -170,6 +179,7 @@
 
     <!-- 右上角工具列疊加層 -->
     <div class="top-right-tools" id="photo-tools-panel">
+      <button id="btn-mode-perspective" class="tool-btn highlight" style="background-color:#9c27b0; border-color:#e1bee7;">📐 透視畫線</button>
       <button id="btn-mode-move" class="tool-btn highlight">👆 移動機台</button>
       <button id="btn-mode-rotate" class="tool-btn">🔄 旋轉機台</button>
 

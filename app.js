@@ -15,6 +15,12 @@ let hitTestSource = null;
 let hitTestSourceRequested = false;
 let placedBillboards = []; // 存放已放置的機台
 
+// 透視畫線全域變數
+let currentRealWidth = 1;
+let currentRealDepth = 1;
+let drawState = 0; // 0: none, 1: drawing W, 2: drawing D
+let p_w1, p_w2, p_d1, p_d2;
+
 // ------------------------------------------------------------------
 // 1. 初始化介面與 GPS API
 // ------------------------------------------------------------------
@@ -28,11 +34,18 @@ function rebuildModelGroup() {
         photoGroup.remove(photoGroup.children[0]);
     }
     let totalWidth = 0;
+    let maxDepth = 0.5; // fallback
     selectedModels.forEach(modelDef => {
         totalWidth += modelDef.w;
         if (modelDef.hasCap) totalWidth += modelDef.capW;
+        if (modelDef.d > maxDepth) maxDepth = modelDef.d;
+        if (modelDef.hasCap && modelDef.capD > maxDepth) maxDepth = modelDef.capD;
     });
     totalWidth += (selectedModels.length - 1) * 0.1;
+    
+    currentRealWidth = totalWidth || 1;
+    currentRealDepth = maxDepth || 1;
+    
     let currentX = -totalWidth / 2;
     selectedModels.forEach((modelDef) => {
         const machine = createMachine3D(modelDef);
@@ -676,19 +689,50 @@ function startCommonARMode() {
 
     const btnMove = document.getElementById('btn-mode-move');
     const btnRotate = document.getElementById('btn-mode-rotate');
+    const btnPerspective = document.getElementById('btn-mode-perspective');
+    
     interactionMode = 'move';
 
-    btnMove.onclick = () => {
-        btnRotate.classList.remove('highlight');
-        btnMove.classList.add('highlight');
-        interactionMode = 'move';
-    };
-
-    btnRotate.onclick = () => {
+    function setMode(mode) {
+        interactionMode = mode;
         btnMove.classList.remove('highlight');
-        btnRotate.classList.add('highlight');
-        interactionMode = 'rotate';
-    };
+        btnRotate.classList.remove('highlight');
+        if (btnPerspective) btnPerspective.classList.remove('highlight');
+        
+        if (mode === 'move') btnMove.classList.add('highlight');
+        else if (mode === 'rotate') btnRotate.classList.add('highlight');
+        else if (mode === 'perspective') btnPerspective.classList.add('highlight');
+
+        // 如果退出畫線透視模式，隱藏提示與輔助線
+        if (mode !== 'perspective') {
+            drawState = 0;
+            const lw = document.getElementById('line-width');
+            const ld = document.getElementById('line-depth');
+            const hint = document.getElementById('perspective-hint');
+            if (lw) lw.setAttribute('visibility', 'hidden');
+            if (ld) ld.setAttribute('visibility', 'hidden');
+            if (hint) hint.classList.add('hidden');
+        }
+    }
+
+    btnMove.onclick = () => setMode('move');
+    btnRotate.onclick = () => setMode('rotate');
+
+    if (btnPerspective) {
+        btnPerspective.onclick = () => {
+            if (interactionMode === 'perspective') {
+                setMode('move'); // toggle off
+            } else {
+                setMode('perspective');
+                drawState = 1;
+                const hint = document.getElementById('perspective-hint');
+                if (hint) {
+                    hint.textContent = '請在畫面上畫出機台正面底部寬距 (←左右→)';
+                    hint.classList.remove('hidden');
+                }
+            }
+        };
+    }
 
     document.getElementById('btn-scale-up').onclick = () => { if (photoGroup) photoGroup.scale.multiplyScalar(1.1); };
     document.getElementById('btn-scale-down').onclick = () => { if (photoGroup) photoGroup.scale.multiplyScalar(0.9); };
@@ -801,13 +845,106 @@ function startLiveVideoMode() {
         });
 }
 
-function onTouchStart(e) {
+// ----------------------------------------------------
+// 透視對齊輔助函式與核心數學運算
+// ----------------------------------------------------
+function getEventCoords(e) {
+    if (e.touches && e.touches.length > 0) {
+        return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    return { x: e.clientX, y: e.clientY };
+}
+
+function updateLineSVG(id, p1, p2) {
+    const line = document.getElementById(id);
+    if (!line) return;
+    line.setAttribute('x1', p1.x);
+    line.setAttribute('y1', p1.y);
+    line.setAttribute('x2', p2.x);
+    line.setAttribute('y2', p2.y);
+    line.setAttribute('visibility', 'visible');
+}
+
+function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
+    if (!photoGroup || !photoCamera) return;
+
+    // 將像素向量轉換為 Three.js 螢幕座標 (Y需反向)
+    let dwx = pw2.x - pw1.x;
+    let dwy = -(pw2.y - pw1.y); 
+    let ddx = pd2.x - pd1.x;
+    let ddy = -(pd2.y - pd1.y);
+
+    let ux = dwx / currentRealWidth;
+    let uy = dwy / currentRealWidth;
+    let vx = ddx / currentRealDepth;
+    let vy = ddy / currentRealDepth;
+
+    let A = ux * vx + uy * vy;
+    let B = (vx * vx + vy * vy) - (ux * ux + uy * uy);
+
+    let z2_sq = (-B + Math.sqrt(B * B + 4 * A * A)) / 2;
+    let z2 = Math.sqrt(Math.max(0, z2_sq));
+    let z1 = z2 !== 0 ? A / z2 : Math.sqrt(Math.max(0, B));
+
+    let Vx = new THREE.Vector3(ux, uy, z1);
+    let Vz = new THREE.Vector3(-vx, -vy, z2);
+    let Vy = new THREE.Vector3().crossVectors(Vz, Vx);
+
+    let S = Vx.length();
+    if (S === 0) return;
+
+    Vx.normalize();
+    Vy.normalize();
+    Vz.normalize();
+
+    let R = new THREE.Matrix4().makeBasis(Vx, Vy, Vz);
+
+    // 套用計算出來的 3D 旋轉矩陣 (轉換為 Quaternion)
+    photoGroup.quaternion.setFromRotationMatrix(R);
+
+    // 換算縮放 (從輔助線像素長度轉換至 3D 空間網格比例)
+    let visibleHeightMeters = 2 * photoCamera.position.z * Math.tan( THREE.MathUtils.degToRad( photoCamera.fov / 2 ) );
+    let pixelsPerMeter = window.innerHeight / visibleHeightMeters;
+    let modelScale = S / pixelsPerMeter;
+    
+    photoGroup.scale.set(modelScale, modelScale, modelScale);
+
+    // 重新置中輔助定位，以兩條線的中心為基準點
+    let cx = (pw1.x + pw2.x + pd1.x + pd2.x) / 4;
+    let cy = (pw1.y + pw2.y + pd1.y + pd2.y) / 4;
+    let ndcX = (cx / window.innerWidth) * 2 - 1;
+    let ndcY = -(cy / window.innerHeight) * 2 + 1;
+    
+    let targetPos = new THREE.Vector3(ndcX, ndcY, 0.5);
+    targetPos.unproject(photoCamera);
+    let dir = targetPos.sub(photoCamera.position).normalize();
+    let distance = photoCamera.position.z; 
+    let finalPos = photoCamera.position.clone().add(dir.multiplyScalar(distance));
+    
+    photoGroup.position.copy(finalPos);
+}
+
+// ----------------------------------------------------
+// 滑鼠與觸控共通處理邏輯
+// ----------------------------------------------------
+function handlePointerDown(e) {
     if (!photoGroup) return;
 
-    if (e.touches.length === 1) {
+    if (interactionMode === 'perspective') {
+        const p = getEventCoords(e);
+        if (drawState === 1) {
+            p_w1 = p; p_w2 = p;
+            updateLineSVG('line-width', p_w1, p_w2);
+        } else if (drawState === 2) {
+            p_d1 = p; p_d2 = p;
+            updateLineSVG('line-depth', p_d1, p_d2);
+        }
         isDragging = true;
-        previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    } else if (e.touches.length === 2) {
+        if (e.cancelable) e.preventDefault();
+        return;
+    }
+
+    if (e.type.startsWith('touch') && e.touches.length === 2) {
         isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -815,27 +952,43 @@ function onTouchStart(e) {
         initialPinchAngle = Math.atan2(dy, dx);
         initialScale = photoGroup.scale.x;
         initialRotation = photoGroup.rotation.z; // 雙指平轉改為 Z 軸 rolling
+    } else {
+        isDragging = true;
+        previousMousePosition = getEventCoords(e);
     }
 }
 
-function onTouchMove(e) {
-    if (e.cancelable) e.preventDefault();
+function handlePointerMove(e) {
     if (!photoGroup) return;
 
-    if (isDragging && e.touches.length === 1) {
-        const deltaX = e.touches[0].clientX - previousMousePosition.x;
-        const deltaY = e.touches[0].clientY - previousMousePosition.y;
+    if (interactionMode === 'perspective' && isDragging) {
+        if (e.cancelable) e.preventDefault();
+        const p = getEventCoords(e);
+        if (drawState === 1) {
+            p_w2 = p; updateLineSVG('line-width', p_w1, p_w2);
+        } else if (drawState === 2) {
+            p_d2 = p; updateLineSVG('line-depth', p_d1, p_d2);
+        }
+        return;
+    }
+
+    if (!isDragging && (!e.touches || e.touches.length !== 2)) return;
+    if (e.cancelable) e.preventDefault();
+
+    if (isDragging) {
+        const currentPos = getEventCoords(e);
+        const deltaX = currentPos.x - previousMousePosition.x;
+        const deltaY = currentPos.y - previousMousePosition.y;
 
         if (interactionMode === 'move') {
             photoGroup.position.x += deltaX * 0.015;
             photoGroup.position.y -= deltaY * 0.015;
         } else if (interactionMode === 'rotate') {
-            photoGroup.rotation.y += deltaX * 0.01; // 左右滑動控制 Yaw
-            photoGroup.rotation.x += deltaY * 0.01; // 上下滑動控制 Pitch
+            photoGroup.rotation.y += deltaX * 0.01;
+            photoGroup.rotation.x += deltaY * 0.01;
         }
-
-        previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    } else if (e.touches.length === 2 && initialPinchDistance) {
+        previousMousePosition = currentPos;
+    } else if (e.touches && e.touches.length === 2 && initialPinchDistance) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         const distance = Math.sqrt(dx * dx + dy * dy);
@@ -846,45 +999,52 @@ function onTouchMove(e) {
 
         const s = initialScale * pinchScale;
         photoGroup.scale.set(s, s, s);
-        photoGroup.rotation.z = initialRotation - rotateDiff; // 雙指控制畫面平面的旋轉 (Roll)
+        photoGroup.rotation.z = initialRotation - rotateDiff;
     }
 }
 
-function onTouchEnd(e) {
+function handlePointerUp(e) {
+    if (!photoGroup) return;
+
+    if (interactionMode === 'perspective' && isDragging) {
+        isDragging = false;
+        if (drawState === 1) {
+            if (Math.hypot(p_w2.x - p_w1.x, p_w2.y - p_w1.y) < 20) {
+                document.getElementById('line-width').setAttribute('visibility', 'hidden');
+                return; // 畫太短，忽略這次操作
+            }
+            drawState = 2;
+            document.getElementById('perspective-hint').textContent = '請接著畫出機台側面底部深度線 (↙前後↗)';
+        } else if (drawState === 2) {
+            if (Math.hypot(p_d2.x - p_d1.x, p_d2.y - p_d1.y) < 20) {
+                document.getElementById('line-depth').setAttribute('visibility', 'hidden');
+                return;
+            }
+            document.getElementById('perspective-hint').classList.add('hidden');
+            
+            // 執行核心運算與轉換
+            applyPerspectiveTransform(p_w1, p_w2, p_d1, p_d2);
+            
+            // 完成後自動切換回移動模式
+            const btnMove = document.getElementById('btn-mode-move');
+            if (btnMove) btnMove.click();
+        }
+        return;
+    }
+
     isDragging = false;
     initialPinchDistance = null;
     initialPinchAngle = null;
 }
 
-// ----------------------------------------------------
-// 電腦版滑鼠與滾輪支援 (映射至 Touch 邏輯)
-// ----------------------------------------------------
-function onMouseDown(e) {
-    if (!photoGroup) return;
-    isDragging = true;
-    previousMousePosition = { x: e.clientX, y: e.clientY };
-}
+function onTouchStart(e) { handlePointerDown(e); }
+function onTouchMove(e) { handlePointerMove(e); }
+function onTouchEnd(e) { handlePointerUp(e); }
 
-function onMouseMove(e) {
-    if (!photoGroup || !isDragging) return;
+function onMouseDown(e) { handlePointerDown(e); }
+function onMouseMove(e) { handlePointerMove(e); }
+function onMouseUp(e) { handlePointerUp(e); }
 
-    const deltaX = e.clientX - previousMousePosition.x;
-    const deltaY = e.clientY - previousMousePosition.y;
-
-    if (interactionMode === 'move') {
-        photoGroup.position.x += deltaX * 0.015;
-        photoGroup.position.y -= deltaY * 0.015;
-    } else if (interactionMode === 'rotate') {
-        photoGroup.rotation.y += deltaX * 0.01;
-        photoGroup.rotation.x += deltaY * 0.01;
-    }
-
-    previousMousePosition = { x: e.clientX, y: e.clientY };
-}
-
-function onMouseUp(e) {
-    isDragging = false;
-}
 
 function onMouseWheel(e) {
     e.preventDefault();
