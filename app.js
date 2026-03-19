@@ -887,37 +887,35 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     }
     photoGroup.rotation.set(0, yaw, 0);
 
-    // 3. 將寬度線的兩個端點投射到 3D Z=0 平面
-    //    這樣機台前底邊就會精確對齊用戶所畫的黃線，透視感自然產生！
+    // 3. 將寬度線的「兩個端點」各自投射到 3D Z=0 平面
+    //    w3D_A 對應 pw1（左端或右端），w3D_B 對應 pw2（另一端）
+    //    這樣機台前底邊兩個角落就會精確落在兩端點，讓底部寬度完整對齊黃線！
     function screenTo3D(p) {
         let ndcX = (p.x / window.innerWidth) * 2 - 1;
         let ndcY = -(p.y / window.innerHeight) * 2 + 1;
         let vec = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
         let dir = vec.sub(photoCamera.position).normalize();
-        // 與 Z=0 平面的交點
-        let t = -photoCamera.position.z / dir.z;
-        return photoCamera.position.clone().addScaledVector(dir, t);
+        let tt = -photoCamera.position.z / dir.z;
+        return photoCamera.position.clone().addScaledVector(dir, tt);
     }
 
-    let worldAnchor = screenTo3D(anchor_O);
-    let worldPW     = screenTo3D(pW);
+    let w3D_A = screenTo3D(pw1);  // 前底 角落 A
+    let w3D_B = screenTo3D(pw2);  // 前底 角落 B
 
-    // 4. 根據寬度線在 3D 中的長度，計算縮放係數
-    let dist3D = worldAnchor.distanceTo(worldPW);
+    // 4. 縮放：兩角落在 3D 中的距離 ÷ 機台實際線寬
+    let dist3D = w3D_A.distanceTo(w3D_B);
     let modelScale = dist3D / currentRealWidth;
     photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    // 5. 判定 Anchor 是左前角還是右前角
-    //    深度線向左 → 攝影師在右邊 → Anchor 是右前角 (isFrontRight)
-    let isFrontRight = (pD.x - anchor_O.x) < 0;
+    // 5. 機台中心 = 兩角落中點 (=前底中心)，再往後退 front face Z 偏移
+    let frontBottomCenter = new THREE.Vector3().addVectors(w3D_A, w3D_B).multiplyScalar(0.5);
 
-    // 6. 機台中心 = worldAnchor − 前角的本地偏移
-    let cornerX = isFrontRight ? (currentRealWidth / 2) : (-currentRealWidth / 2);
-    let localCorner = new THREE.Vector3(cornerX, -1, 1);
-    let worldOffset = localCorner.clone().multiplyScalar(modelScale)
+    // 將 front face 的 local 中心 (0, -1, 1) 偏移轉到世界空間
+    let localFrontBottom = new THREE.Vector3(0, -1, 1);
+    let worldFrontOffset = localFrontBottom.clone().multiplyScalar(modelScale)
         .applyQuaternion(photoGroup.quaternion);
 
-    photoGroup.position.copy(worldAnchor).sub(worldOffset);
+    photoGroup.position.copy(frontBottomCenter).sub(worldFrontOffset);
 }
 
 
