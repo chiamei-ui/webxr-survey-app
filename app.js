@@ -886,47 +886,39 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     }
     photoGroup.rotation.set(0, yaw, 0);
 
-    // 3. 計算螢幕像素/3D 單位換算比 (基於相機 FOV 與距離)
-    // 相機坐標系：camera 在 (0,0,8)，FOV=70，正面 front 在 Z=0（group Z=0，local front Z=1→world Z=0）
-    // 機台前面的世界 Z = group.position.z + 1*scale ≒ 0
-    // 所以我們假設前面在 z=0，算出正確的世界尺寸
-    let fovRad = THREE.MathUtils.degToRad(photoCamera.fov);
-    let cameraZ = photoCamera.position.z; // =8
-    let frontZ = 0;                       // 機台前面假設放在世界 Z=0
-    let distToFront = cameraZ - frontZ;   // =8
-
-    // 螢幕高度對應 3D 世界高度 (在 frontZ 平面)
-    let worldHeightAtFront = 2 * distToFront * Math.tan(fovRad / 2);
-    let pixPerUnit = window.innerHeight / worldHeightAtFront; // 像素/3D 單位
-
-    // 寬度線的完整螢幕像素長度（pw1 到 pw2）
-    let wLen = Math.hypot(pw2.x - pw1.x, pw2.y - pw1.y);
-    if (wLen < 5) return;
-
-    // 3D 縮放 = 像素長度 ÷ 像素/單位 ÷ 機台實際寬度
-    let modelScale = (wLen / pixPerUnit) / currentRealWidth;
-    photoGroup.scale.set(modelScale, modelScale, modelScale);
-
-    // 4. 寬度線中點的螢幕位置 → 對應 3D 世界座標 (在 frontZ 平面)
-    let midScreen = { x: (pw1.x + pw2.x) / 2, y: (pw1.y + pw2.y) / 2 };
-    
-    function screenToWorld(p, worldZ) {
-        let ndcX = (p.x / window.innerWidth) * 2 - 1;
-        let ndcY = -(p.y / window.innerHeight) * 2 + 1;
-        // 透視投影：worldX = ndcX * distToTarget * tan(fovH/2)
-        let aspect = window.innerWidth / window.innerHeight;
-        let halfFovH = Math.atan(Math.tan(fovRad / 2) * aspect);
-        let dist = cameraZ - worldZ;
-        let wx = ndcX * dist * Math.tan(halfFovH);
-        let wy = ndcY * dist * Math.tan(fovRad / 2);
-        return new THREE.Vector3(wx, wy, worldZ);
+    // 3. 核心定位：將 pw1、pw2 各自用射線投影到世界 Z=0 平面
+    //    Three.js unproject 已正確處理相機的 FOV / aspect / roll，
+    //    所以螢幕邊緣的透視比例差也能精確映射！
+    function toWorldOnZ0(p) {
+        let ndc = new THREE.Vector2(
+            (p.x / window.innerWidth) * 2 - 1,
+            -(p.y / window.innerHeight) * 2 + 1
+        );
+        let raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(ndc, photoCamera);
+        // 與 Z=0 平面相交（相機看向 -Z，dir.z < 0）
+        let t = (0 - photoCamera.position.z) / raycaster.ray.direction.z;
+        return photoCamera.position.clone().addScaledVector(raycaster.ray.direction, t);
     }
 
-    // 前底中心的世界位置 (frontZ=0 平面)
-    let frontBottomCenter = screenToWorld(midScreen, frontZ);
+    let w1_3D = toWorldOnZ0(pw1);
+    let w2_3D = toWorldOnZ0(pw2);
 
-    // 5. 機台 group 中心 = 前底中心 − localFrontBottom * scale
-    //    localFrontBottom = (0, -1, 1)：front face 底部在 group local 的位置
+    // 寬度 = pw1/pw2 在 3D 空間的水平距離（X 方向，避免因高度差造成誤差）
+    let dist3D = Math.abs(w1_3D.x - w2_3D.x);
+    if (dist3D < 0.001) dist3D = w1_3D.distanceTo(w2_3D); // 如果 Y=90 就用全距離
+    let modelScale = dist3D / currentRealWidth;
+    photoGroup.scale.set(modelScale, modelScale, modelScale);
+
+    // 前底中心 = 兩端點 3D 座標的中點
+    let frontBottomCenter = new THREE.Vector3(
+        (w1_3D.x + w2_3D.x) / 2,
+        (w1_3D.y + w2_3D.y) / 2,
+        0
+    );
+
+    // 4. 計算 group 中心偏移
+    //    localFrontBottom = (0, -1, 1)：前底面中心在 group local 的位置
     let localFrontBottom = new THREE.Vector3(0, -1, 1);
     let worldFrontOffset = localFrontBottom.clone().multiplyScalar(modelScale)
         .applyQuaternion(photoGroup.quaternion);
