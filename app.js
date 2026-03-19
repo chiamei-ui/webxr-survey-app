@@ -859,10 +859,11 @@ function getIntersection(a1, a2, b1, b2) {
 function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     if (!photoGroup || !photoCamera) return;
 
-    // 1. 取得交點 (Anchor)
+    // 1. 計算交點 (Anchor)
     let anchor_O = getIntersection(pw1, pw2, pd1, pd2);
     if (!anchor_O) anchor_O = pw1;
 
+    // 取得寬度線、深度線的「遠端」點 (相對 Anchor 最遠的那端)
     let dW1 = Math.hypot(pw1.x - anchor_O.x, pw1.y - anchor_O.y);
     let dW2 = Math.hypot(pw2.x - anchor_O.x, pw2.y - anchor_O.y);
     let pW = (dW1 > dW2) ? pw1 : pw2;
@@ -875,90 +876,56 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     updateLineSVG('line-depth', anchor_O, pD);
 
     let wLen = Math.hypot(pW.x - anchor_O.x, pW.y - anchor_O.y);
-    let dLen = Math.hypot(pD.x - anchor_O.x, pD.y - anchor_O.y);
     if (wLen < 5) return;
 
-    // 2. 由高度線判定螢幕照片的傾斜 (Camera Roll)
+    // 2. 判定手機方向 → 決定 Y 軸角度
+    // 用高度線方向判斷：如果高度線接近垂直，Y=0（直向）；接近水平，Y=90（橫向）
     let vh = { x: ph2.x - ph1.x, y: ph2.y - ph1.y };
-    let rollAngle = 0;
-    if (Math.hypot(vh.x, vh.y) > 10) {
-        rollAngle = Math.atan2(-vh.y, vh.x) - Math.PI / 2;
-        rollAngle = Math.round(rollAngle / (Math.PI / 2)) * (Math.PI / 2);
-    }
-    
-    // **重要：將相機旋轉，使 3D 世界與照片對齊**
-    // 保持相機 Pitch=0 (看向地平線)，這保證了 3D 物體的垂直線在螢幕上永遠是垂直的！
-    photoCamera.rotation.set(0, 0, rollAngle);
-    photoCamera.updateMatrixWorld(true);
+    let vhLen = Math.hypot(vh.x, vh.y);
+    let yaw = 0; // 預設正面 Y=0
 
-    // 3. 地平面射線投射
-    function ndc(p) {
-        return new THREE.Vector2(
-            (p.x / window.innerWidth) * 2 - 1,
-            -(p.y / window.innerHeight) * 2 + 1
-        );
-    }
-    const floorY = -1.5;
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY);
-    const raycaster = new THREE.Raycaster();
-
-    function getFloorPoint(p) {
-        raycaster.setFromCamera(ndc(p), photoCamera);
-        let intersection = new THREE.Vector3();
-        if (raycaster.ray.intersectPlane(plane, intersection)) {
-            return intersection;
+    if (vhLen > 10) {
+        // 高度線與螢幕垂直方向的夾角
+        let heightAngle_deg = Math.abs(Math.atan2(vh.x, -vh.y) * 180 / Math.PI);
+        // 如果接近水平 (>45 度)，代表手機打橫，Yaw = 90
+        if (heightAngle_deg > 45) {
+            yaw = Math.PI / 2;
         }
-        return raycaster.ray.at(10, new THREE.Vector3());
     }
 
-    let P1 = getFloorPoint(anchor_O);
-    let PW = getFloorPoint(pW);
-    let PD = getFloorPoint(pD);
+    // 3. 判定深度線方向 → 決定 Anchor 在左前方還是右前方
+    // 寬度線通常是水平的：若深度線伸向「右下」，代表攝影師站在左前方 → Anchor 在左前角
+    // 若深度線伸向「左下」，代表攝影師站在右前方 → Anchor 在右前角
+    let vd_screen_x = pD.x - anchor_O.x; // 深度線的螢幕 X 分量
+    let isFrontRight = (vd_screen_x < 0); // 深度線向左 → 攝影師在右邊 → anchor 在右前角
 
-    // 4. 重構機台方向 (3D 基底)
-    let dirX_raw = new THREE.Vector3().subVectors(PW, P1).normalize();
-    
-    // 5. 鎖定 Yaw (0/90) 改進版：相對於相機視軸進行 Snap
-    let camDir = new THREE.Vector3();
-    photoCamera.getWorldDirection(camDir);
-    camDir.y = 0; camDir.normalize();
-    
-    // 計算黃線 (Width) 在地面上與相機視軸的夾角
-    let angleToCam = Math.atan2(dirX_raw.x, dirX_raw.z) - Math.atan2(camDir.x, camDir.z);
-    
-    // 依照視覺長短決定是正面 (0) 還是側面 (90)
-    let targetRelativeYaw = (wLen >= dLen) ? 0 : Math.PI / 2;
-    
-    // 預防背面 (180) 被誤認為正面：檢查深度線 PD 與相機方向的點積
-    let dirZ_raw = new THREE.Vector3().subVectors(PD, P1).normalize();
-    let isFrontRight = false;
-    
-    // 如果深度線是指向攝影機的，代表我們標記的是右前角
-    if (raycaster.ray.direction.dot(dirZ_raw) > 0) {
-        isFrontRight = true;
-    }
+    // 4. 設定機台旋轉（Y 軸只有 0 或 90 度，X/Z=0 保持絕對垂直）
+    photoGroup.rotation.set(0, yaw, 0);
 
-    // 將相對角度 Snap 到 90 度倍數
-    let snappedRelYaw = Math.round(angleToCam / (Math.PI / 2)) * (Math.PI / 2);
-    
-    // 最終世界 Yaw = 相機 Yaw + 被 Snap 過的相對 Yaw + 視覺修正 (0 or 90)
-    let finalWorldYaw = Math.atan2(camDir.x, camDir.z) + snappedRelYaw + targetRelativeYaw;
-
-    // Y 軸鎖定在 0 (垂直)，由相機 Z 軸 Roll 處理歪斜
-    photoGroup.rotation.set(0, finalWorldYaw, 0);
-
-    // 6. 縮放與定位
-    let dist3D = P1.distanceTo(PW);
-    let modelScale = dist3D / currentRealWidth;
+    // 5. 計算縮放：將螢幕像素長度映射到 3D 單位
+    // 相機在 z=8，FOV=70 的情況下，螢幕高度對應的 3D 世界高度：
+    let visibleHeight = 2 * photoCamera.position.z * Math.tan(THREE.MathUtils.degToRad(photoCamera.fov / 2));
+    let pixPerMeter = window.innerHeight / visibleHeight;
+    let modelScale = wLen / (currentRealWidth * pixPerMeter);
     photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    // 定位 Offset (錨點在 corner)
+    // 6. 定位：將 anchor_O 的 2D 螢幕座標直接映射到 3D Z=0 平面
+    let ndcX = (anchor_O.x / window.innerWidth) * 2 - 1;
+    let ndcY = -(anchor_O.y / window.innerHeight) * 2 + 1;
+    let anchorVec = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
+    let dir = anchorVec.sub(photoCamera.position).normalize();
+    let t = -photoCamera.position.z / dir.z;
+    let worldAnchor = photoCamera.position.clone().addScaledVector(dir, t);
+
+    // 7. 根據 Anchor 在左前或右前，偏移機台中心
     let cornerX = isFrontRight ? (currentRealWidth / 2) : (-currentRealWidth / 2);
     let localCorner = new THREE.Vector3(cornerX, -1, 1);
     let worldOffset = localCorner.clone().multiplyScalar(modelScale).applyQuaternion(photoGroup.quaternion);
 
-    photoGroup.position.copy(P1).sub(worldOffset);
+    photoGroup.position.copy(worldAnchor).sub(worldOffset);
 }
+
+
 
 
 
