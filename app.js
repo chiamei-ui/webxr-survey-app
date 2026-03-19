@@ -859,11 +859,11 @@ function getIntersection(a1, a2, b1, b2) {
 function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     if (!photoGroup || !photoCamera) return;
 
-    // 1. 計算交點 (Anchor)
+    // 1. 計算交點 (Anchor) — 寬線與深度線延伸後的交叉點
     let anchor_O = getIntersection(pw1, pw2, pd1, pd2);
     if (!anchor_O) anchor_O = pw1;
 
-    // 取得寬度線、深度線的「遠端」點 (相對 Anchor 最遠的那端)
+    // 取得寬度線「遠端」點（相對 Anchor 最遠的那一端）
     let dW1 = Math.hypot(pw1.x - anchor_O.x, pw1.y - anchor_O.y);
     let dW2 = Math.hypot(pw2.x - anchor_O.x, pw2.y - anchor_O.y);
     let pW = (dW1 > dW2) ? pw1 : pw2;
@@ -878,49 +878,44 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     let wLen = Math.hypot(pW.x - anchor_O.x, pW.y - anchor_O.y);
     if (wLen < 5) return;
 
-    // 2. 判定手機方向 → 決定 Y 軸角度
-    // 用高度線方向判斷：如果高度線接近垂直，Y=0（直向）；接近水平，Y=90（橫向）
+    // 2. 由高度線判斷手機方向 → 鎖定 Y=0（直向）或 Y=90（橫向）
     let vh = { x: ph2.x - ph1.x, y: ph2.y - ph1.y };
-    let vhLen = Math.hypot(vh.x, vh.y);
-    let yaw = 0; // 預設正面 Y=0
-
-    if (vhLen > 10) {
-        // 高度線與螢幕垂直方向的夾角
-        let heightAngle_deg = Math.abs(Math.atan2(vh.x, -vh.y) * 180 / Math.PI);
-        // 如果接近水平 (>45 度)，代表手機打橫，Yaw = 90
-        if (heightAngle_deg > 45) {
-            yaw = Math.PI / 2;
-        }
+    let yaw = 0;
+    if (Math.hypot(vh.x, vh.y) > 10) {
+        let hAngleDeg = Math.abs(Math.atan2(vh.x, -vh.y) * 180 / Math.PI);
+        if (hAngleDeg > 45) yaw = Math.PI / 2;
     }
-
-    // 3. 判定深度線方向 → 決定 Anchor 在左前方還是右前方
-    // 寬度線通常是水平的：若深度線伸向「右下」，代表攝影師站在左前方 → Anchor 在左前角
-    // 若深度線伸向「左下」，代表攝影師站在右前方 → Anchor 在右前角
-    let vd_screen_x = pD.x - anchor_O.x; // 深度線的螢幕 X 分量
-    let isFrontRight = (vd_screen_x < 0); // 深度線向左 → 攝影師在右邊 → anchor 在右前角
-
-    // 4. 設定機台旋轉（Y 軸只有 0 或 90 度，X/Z=0 保持絕對垂直）
     photoGroup.rotation.set(0, yaw, 0);
 
-    // 5. 計算縮放：將螢幕像素長度映射到 3D 單位
-    // 相機在 z=8，FOV=70 的情況下，螢幕高度對應的 3D 世界高度：
-    let visibleHeight = 2 * photoCamera.position.z * Math.tan(THREE.MathUtils.degToRad(photoCamera.fov / 2));
-    let pixPerMeter = window.innerHeight / visibleHeight;
-    let modelScale = wLen / (currentRealWidth * pixPerMeter);
+    // 3. 將寬度線的兩個端點投射到 3D Z=0 平面
+    //    這樣機台前底邊就會精確對齊用戶所畫的黃線，透視感自然產生！
+    function screenTo3D(p) {
+        let ndcX = (p.x / window.innerWidth) * 2 - 1;
+        let ndcY = -(p.y / window.innerHeight) * 2 + 1;
+        let vec = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
+        let dir = vec.sub(photoCamera.position).normalize();
+        // 與 Z=0 平面的交點
+        let t = -photoCamera.position.z / dir.z;
+        return photoCamera.position.clone().addScaledVector(dir, t);
+    }
+
+    let worldAnchor = screenTo3D(anchor_O);
+    let worldPW     = screenTo3D(pW);
+
+    // 4. 根據寬度線在 3D 中的長度，計算縮放係數
+    let dist3D = worldAnchor.distanceTo(worldPW);
+    let modelScale = dist3D / currentRealWidth;
     photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    // 6. 定位：將 anchor_O 的 2D 螢幕座標直接映射到 3D Z=0 平面
-    let ndcX = (anchor_O.x / window.innerWidth) * 2 - 1;
-    let ndcY = -(anchor_O.y / window.innerHeight) * 2 + 1;
-    let anchorVec = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
-    let dir = anchorVec.sub(photoCamera.position).normalize();
-    let t = -photoCamera.position.z / dir.z;
-    let worldAnchor = photoCamera.position.clone().addScaledVector(dir, t);
+    // 5. 判定 Anchor 是左前角還是右前角
+    //    深度線向左 → 攝影師在右邊 → Anchor 是右前角 (isFrontRight)
+    let isFrontRight = (pD.x - anchor_O.x) < 0;
 
-    // 7. 根據 Anchor 在左前或右前，偏移機台中心
+    // 6. 機台中心 = worldAnchor − 前角的本地偏移
     let cornerX = isFrontRight ? (currentRealWidth / 2) : (-currentRealWidth / 2);
     let localCorner = new THREE.Vector3(cornerX, -1, 1);
-    let worldOffset = localCorner.clone().multiplyScalar(modelScale).applyQuaternion(photoGroup.quaternion);
+    let worldOffset = localCorner.clone().multiplyScalar(modelScale)
+        .applyQuaternion(photoGroup.quaternion);
 
     photoGroup.position.copy(worldAnchor).sub(worldOffset);
 }
