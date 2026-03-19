@@ -893,6 +893,8 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     if (Math.hypot(vh.x, vh.y) > 10) {
         // 因螢幕座標 Y 是向下的，先把 vh.y 加上負號換算成正常直角座標系
         rollAngle = Math.atan2(-vh.y, vh.x) - Math.PI / 2;
+        // 強制量化為 0, 90, 180, 270 (手機轉向只會有四種方位)
+        rollAngle = Math.round(rollAngle / (Math.PI / 2)) * (Math.PI / 2);
     }
 
     // 5. 反旋轉 2D 螢幕向量，還原至「直立座標系」以辨識左右側
