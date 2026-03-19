@@ -867,75 +867,83 @@ function updateLineSVG(id, p1, p2) {
     line.setAttribute('visibility', 'visible');
 }
 
-function applyPerspectiveTransform(vw, vd, anchorPt) {
+function applyPerspectiveTransform(vw, vd, anchor_O) {
     if (!photoGroup || !photoCamera) return;
 
-    // ===============================================================
-    // 純 Yaw 旋轉：Y 軸永遠垂直螢幕、正面永遠朝向相機
-    // ===============================================================
-    let wLen = Math.hypot(vw.x, vw.y);
-    let dLen = Math.hypot(vd.x, vd.y);
-    if (wLen < 5) return;
-
-    // --- 方向判定 ---
-    // 只看深度線的 X 分量，不依賴寬度線畫法方向：
-    //   vd.x < 0 → 深度線向左 → 看到左側面 → 正面偏右 → yaw > 0 (CCW from top)
-    //   vd.x > 0 → 深度線向右 → 看到右側面 → 正面偏左 → yaw < 0 (CW from top)
-    //   vd.x ≈ 0 → 正面直視，yaw ≈ 0
-
-    // --- Yaw 大小 ---
-    // 透視公式：screenW = realW * cos(yaw), screenD = realD * sin(yaw)
-    // → tan(yaw) = (dLen * realW) / (wLen * realD)
-    let tanYaw = (dLen * currentRealWidth) / (wLen * currentRealDepth);
-    let yawAbs = Math.atan(tanYaw);
-
-    // 限制 yaw 在 ±80° 以內（正面永遠面向相機，不會出現背面）
-    yawAbs = Math.min(yawAbs, Math.PI * 80 / 180);
-
-    let yaw = (vd.x < 0) ? yawAbs : -yawAbs;
-
-    // 如果深度線幾乎沒有水平分量，視為正面直視
-    if (Math.abs(vd.x) < 5) yaw = 0;
-
-    // 套用旋轉，只有 Y 軸旋轉
-    photoGroup.rotation.set(0, yaw, 0);
-
-    // --- 縮放 ---
-    let visibleHeight = 2 * photoCamera.position.z *
-        Math.tan(THREE.MathUtils.degToRad(photoCamera.fov / 2));
-    let pixPerMeter = window.innerHeight / visibleHeight;
-    let cosYaw = Math.cos(yaw);
-
-    // 寬度線像素長度 ≈ realWidth * |cos(yaw)| * scale * pixPerMeter
-    let modelScale;
-    if (Math.abs(cosYaw) > 0.1) {
-        modelScale = wLen / (currentRealWidth * Math.abs(cosYaw) * pixPerMeter);
-    } else {
-        // 極端側面角度時改用深度線推算
-        modelScale = dLen / (currentRealDepth * Math.abs(Math.sin(yaw)) * pixPerMeter);
+    // 將螢幕 2D 座標轉換為 NDC (-1 ~ +1)
+    function ndc(p) {
+        return new THREE.Vector2(
+            (p.x / window.innerWidth) * 2 - 1,
+            -(p.y / window.innerHeight) * 2 + 1
+        );
     }
 
-    photoGroup.scale.set(modelScale, modelScale, modelScale);
+    // 取得兩條線的起終點像素座標 (全部由 anchor_O 出發)
+    let p1 = anchor_O;
+    let pW = { x: anchor_O.x + vw.x, y: anchor_O.y + vw.y };
+    let pD = { x: anchor_O.x + vd.x, y: anchor_O.y + vd.y };
 
-    // --- 定位：anchor 對齊機台底角 ---
-    let ndcX = (anchorPt.x / window.innerWidth) * 2 - 1;
-    let ndcY = -(anchorPt.y / window.innerHeight) * 2 + 1;
-    let target = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
-    let dir = target.sub(photoCamera.position).normalize();
-    let worldPos = photoCamera.position.clone().add(
-        dir.multiplyScalar(photoCamera.position.z)
-    );
+    // 射線投射至 3D 地平面 (假設地平面在 Y = -1.5)
+    const floorY = -1.5;
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY);
+    const raycaster = new THREE.Raycaster();
 
-    // 機台底部角落 (Local Space)
-    // rebuildModelGroup 中 position.y = -1, z = 1 - d/2 → 正面 z ≈ 1
-    // 群組的 local 原點在 (0, 0, 0)
-    // 底部前角最左點約在 (-totalW/2, -1, 1)
+    function getFloorPoint(p) {
+        raycaster.setFromCamera(ndc(p), photoCamera);
+        let intersection = new THREE.Vector3();
+        if (raycaster.ray.intersectPlane(plane, intersection)) {
+            return intersection;
+        }
+        // 如果射向天空，則在距離相機 10 米處強制建立一點作為備援
+        return raycaster.ray.at(10, new THREE.Vector3());
+    }
+
+    let P1 = getFloorPoint(p1);
+    let PW = getFloorPoint(pW);
+    let PD = getFloorPoint(pD);
+
+    // 建立 3D 空間的方向向量
+    let dirX = new THREE.Vector3().subVectors(PW, P1).normalize(); // 寬度方向 (+X)
+    let dirZ = new THREE.Vector3().subVectors(P1, PD).normalize(); // 深度方向 (+Z，從後往前看)
+
+    // 因為手機拍攝照片可能略有歪斜，我們強制讓 Y 軸維持絕對垂直
+    // 重新正交化 (Gram-Schmidt)
+    let upY = new THREE.Vector3(0, 1, 0);
+    // 寬度線的方向向量投影到水平面後的方向
+    dirX.y = 0; dirX.normalize();
+
+    // 建立旋轉矩陣
+    // 機台 X 軸 = dirX
+    // 機台 Y 軸 = upY
+    // 機台 Z 軸 = dirX x upY
+    let finalZ = new THREE.Vector3().crossVectors(dirX, upY);
+    
+    // 如果使用者拖曳深度線的方向與預期方向相反 (即 Z 指向相機背後)，翻轉 Z
+    if (finalZ.dot(new THREE.Vector3().subVectors(P1, PD)) < 0) {
+        // 這表示 PD 在 dirX 的某一側使得叉積反向
+        // 我們通常希望正面面向相機，所以 check PD vs P1 的 z 座標
+    }
+
+    // 更新機台角度
+    let rotMatrix = new THREE.Matrix4().makeBasis(dirX, upY, finalZ);
+    photoGroup.quaternion.setFromRotationMatrix(rotMatrix);
+
+    // --- 計算縮放 (以寬度線為基準) ---
+    // 3D 寬度向量在 dirX 方向上的投影長度
+    let dist3D = P1.distanceTo(PW);
+    let scale = dist3D / currentRealWidth;
+    photoGroup.scale.set(scale, scale, scale);
+
+    // --- 計算位置 (讓 P1 與機台的左前方底角對齊) ---
+    // 預設 rebuildModelGroup 將機台置中於 (0,0,0)，底部前緣在 Z=1, Y=-1, X 範圍 -W/2 ~ W/2
+    // 對於一排機台，左前底角在 (-totalWidth/2, -1, 1)
     let localCorner = new THREE.Vector3(-currentRealWidth / 2, -1, 1);
-    let worldOffset = localCorner.clone().multiplyScalar(modelScale);
-    worldOffset.applyEuler(new THREE.Euler(0, yaw, 0));
+    let worldOffset = localCorner.clone().multiplyScalar(scale).applyQuaternion(photoGroup.quaternion);
 
-    photoGroup.position.copy(worldPos).sub(worldOffset);
+    // 令群組的「左前底角位置」等於我們投影出的世界點 P1
+    photoGroup.position.copy(P1).sub(worldOffset);
 }
+
 
 
 // ----------------------------------------------------
