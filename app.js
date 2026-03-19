@@ -878,20 +878,20 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     let dLen = Math.hypot(pD.x - anchor_O.x, pD.y - anchor_O.y);
     if (wLen < 5) return;
 
-    // 2. 由高度線判定螢幕照片是否有旋轉 (解決躺平問題)
+    // 2. 由高度線判定螢幕照片的傾斜 (Camera Roll)
     let vh = { x: ph2.x - ph1.x, y: ph2.y - ph1.y };
     let rollAngle = 0;
     if (Math.hypot(vh.x, vh.y) > 10) {
         rollAngle = Math.atan2(-vh.y, vh.x) - Math.PI / 2;
-        // 手機旋轉通常是 90 度的倍數，鎖定量化以求穩定
         rollAngle = Math.round(rollAngle / (Math.PI / 2)) * (Math.PI / 2);
     }
     
-    // 將 photoCamera 隨著照片轉向！
+    // **重要：將相機旋轉，使 3D 世界與照片對齊**
+    // 保持相機 Pitch=0 (看向地平線)，這保證了 3D 物體的垂直線在螢幕上永遠是垂直的！
     photoCamera.rotation.set(0, 0, rollAngle);
     photoCamera.updateMatrixWorld(true);
 
-    // 3. 地平面射線投射 (Ray-casting)
+    // 3. 地平面射線投射
     function ndc(p) {
         return new THREE.Vector2(
             (p.x / window.innerWidth) * 2 - 1,
@@ -919,7 +919,6 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     let dirX_raw = new THREE.Vector3().subVectors(PW, P1).normalize();
     
     // 5. 鎖定 Yaw (0/90) 改進版：相對於相機視軸進行 Snap
-    // 我們要讓機台的正面「正對」或「正側對」著相機，而非世界 Z 軸。
     let camDir = new THREE.Vector3();
     photoCamera.getWorldDirection(camDir);
     camDir.y = 0; camDir.normalize();
