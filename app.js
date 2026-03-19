@@ -130,7 +130,12 @@ function initUI() {
         selectedModels = Array.from(checkboxes).map(cb => {
             const capCheckbox = cb.parentElement.nextElementSibling?.querySelector('.cap-check');
             const askForCap = capCheckbox ? capCheckbox.checked : false;
+            // 取得機台正確名稱，移除可能的多餘勾選框文字
+            let labelText = cb.parentElement.textContent.replace('(+ 勾選顯示瓶蓋箱)', '').trim();
+            
             return {
+                name: labelText,
+                value: cb.value,
                 w: parseFloat(cb.dataset.w) / 100,
                 h: parseFloat(cb.dataset.h) / 100,
                 d: (parseFloat(cb.dataset.d) || 50) / 100,
@@ -165,6 +170,7 @@ function initUI() {
         dimsList.innerHTML = '';
         
         let totalW = 0;
+        let maxD = 0;
         // selectedModels 的長寬高現在是公尺 (0.85)，顯示時要轉回公分 (*100)
         selectedModels.forEach((model, index) => {
             const item = document.createElement('div');
@@ -174,29 +180,34 @@ function initUI() {
             const realH = Math.round(model.h * 100);
             const realD = Math.round(model.d * 100);
             
+            let currentLocalMaxD = realD;
+
             const unitW = realW + (model.hasCap ? Math.round(model.capW * 100) : 0);
             totalW += unitW;
             if (index < selectedModels.length - 1) totalW += 10; // 建議間距 10cm
 
-            let details = `<span class="dim-name">${index + 1}. [${model.color}] 機台</span>`;
+            let details = `<span class="dim-name">${index + 1}. <b>${model.name}</b></span>`;
             details += `<div class="dim-values">寬 ${realW} x 高 ${realH} x 深 ${realD} cm</div>`;
             if (model.hasCap) {
                 const cw = Math.round(model.capW * 100);
                 const ch = Math.round(model.capH * 100);
                 const cd = Math.round(model.capD * 100);
-                details += `<div class="dim-values" style="font-size:0.85em; color:#666;">└ 配件: 寬 ${cw} x 高 ${ch} x 深 ${cd} cm</div>`;
+                details += `<div class="dim-values" style="font-size:0.85em; color:#666;">└ 附加配件: 寬 ${cw} x 高 ${ch} x 深 ${cd} cm</div>`;
+                if (cd > currentLocalMaxD) currentLocalMaxD = cd;
             }
-            
+            if (currentLocalMaxD > maxD) maxD = currentLocalMaxD;
+
             item.innerHTML = details;
             dimsList.appendChild(item);
         });
 
-        if (selectedModels.length > 1) {
+        if (selectedModels.length > 0) {
             const totalDiv = document.createElement('div');
             totalDiv.className = 'dim-total';
             totalDiv.innerHTML = `
-                <div class="dim-total-label">總標記寬度 (含 10cm 間距):</div>
-                <div class="dim-total-val">${totalW.toFixed(0)} cm</div>
+                <div class="dim-total-label">📍 建議標記所需空間:</div>
+                <div class="dim-total-val" style="font-size:1.15em;">總寬度: ${totalW.toFixed(0)} <small>cm (含 10cm 間距)</small></div>
+                <div class="dim-total-val" style="font-size:1.15em;">最大進深: ${maxD.toFixed(0)} <small>cm</small></div>
             `;
             dimsList.appendChild(totalDiv);
         }
