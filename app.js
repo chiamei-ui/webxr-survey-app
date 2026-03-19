@@ -671,9 +671,9 @@ function startCommonARMode() {
     document.body.appendChild(container);
 
     photoScene = new THREE.Scene();
-    // 使用極致長焦 (FOV=1, Z=500) 來大幅度消除相機邊緣畸變，讓 3D 機台的垂直線幾乎呈現正交 (Orthographic) 狀態，消除使用者看到的「Y軸歪斜」
-    photoCamera = new THREE.PerspectiveCamera(1, window.innerWidth / window.innerHeight, 100, 1000);
-    photoCamera.position.z = 500;
+    // 還原為正常手機相機的自然透視視角 (FOV=70)，消除「不自然的梯形」逆透視盲區錯覺
+    photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    photoCamera.position.z = 8;
 
     const light = new THREE.AmbientLight(0xffffff, 2.0);
     photoScene.add(light);
@@ -882,16 +882,10 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
     let dLen = Math.hypot(vd.x, vd.y);
     if (wLen < 5) return;
 
-    // 3. 計算 Yaw 角度 (利用純比例解法)
-    let tanYaw = (dLen * currentRealWidth) / (wLen * currentRealDepth);
-    let yawAbs = Math.atan(tanYaw);
-    
-    // 依據使用者要求：保持機台 Yaw 只有 0 度或 90 度，不允許其他微小斜角！
-    if (yawAbs < Math.PI / 4) {
-        yawAbs = 0;
-    } else {
-        yawAbs = Math.PI / 2;
-    }
+    // 3. 計算 Yaw 角度
+    // 直接憑畫面上哪條線拉得比較長，直覺判定使用者拍攝的是「正面多」還是「側面多」
+    // 如果把機台物理長寬比也算進去，會導致只要機群總寬度大，永遠都會判定為側面。
+    let yawAbs = (wLen >= dLen) ? 0 : Math.PI / 2;
 
     // 4. 解析機台真正的向上方向與 Roll
     let vh = { x: ph2.x - ph1.x, y: ph2.y - ph1.y };
