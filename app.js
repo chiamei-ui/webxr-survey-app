@@ -671,8 +671,9 @@ function startCommonARMode() {
     document.body.appendChild(container);
 
     photoScene = new THREE.Scene();
-    photoCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
-    photoCamera.position.z = 8;
+    // 使用極致長焦 (FOV=1, Z=500) 來大幅度消除相機邊緣畸變，讓 3D 機台的垂直線幾乎呈現正交 (Orthographic) 狀態，消除使用者看到的「Y軸歪斜」
+    photoCamera = new THREE.PerspectiveCamera(1, window.innerWidth / window.innerHeight, 100, 1000);
+    photoCamera.position.z = 500;
 
     const light = new THREE.AmbientLight(0xffffff, 2.0);
     photoScene.add(light);
@@ -892,44 +893,50 @@ function applyPerspectiveTransform(pw1, pw2, pd1, pd2, ph1, ph2) {
         yawAbs = Math.PI / 2;
     }
 
-    // 4. 解析機台真正的 Roll (Z軸滾轉) 確保正面寬度位置貼齊！
+    // 4. 解析機台真正的向上方向與 Roll
     let vh = { x: ph2.x - ph1.x, y: ph2.y - ph1.y };
-    let rollAngle = 0;
-    
-    if (yawAbs === 0) {
-        // 若判定為正面 (Yaw=0)，強制將 3D 機台的本體旋轉角度對齊使用者畫出的「寬度黃線 (vw)」
-        // 這樣正面底線就會 100% 像素級貼齊畫線！
-        let baseRoll = Math.atan2(-vw.y, vw.x);
-        let heightAngle = Math.atan2(-vh.y, vh.x);
-        let proposedYAngle = baseRoll + Math.PI / 2;
-        let diff = heightAngle - proposedYAngle;
-        
-        // 正規化角度差至 [-PI, PI] 來判定是否畫上下顛倒 (-180度)
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        if (Math.abs(diff) > Math.PI / 2) {
-            baseRoll += Math.PI; // 顛倒修正
-        }
-        rollAngle = baseRoll;
-    } else {
-        // 若判定為純側面 (Yaw=90)，機台正面朝向 Z 軸深處，我們改以「高度線 (vh)」決定 Roll 確保機台直立
-        if (Math.hypot(vh.x, vh.y) > 10) {
-            rollAngle = Math.atan2(-vh.y, vh.x) - Math.PI / 2;
-        }
+    let vh_roll = 0;
+    if (Math.hypot(vh.x, vh.y) > 10) {
+        vh_roll = Math.atan2(-vh.y, vh.x) - Math.PI / 2;
     }
 
-    // 5. 反旋轉 2D 螢幕向量，還原至「直立座標系」以辨識左右側
-    let cosR = Math.cos(-rollAngle);
-    let sinR = Math.sin(-rollAngle);
-    // 屏座標：X右、Y下。映射至數學系 (x, -y)，然後進行 -rollAngle 旋轉取 X 分量
+    // 5. 反旋轉 Depth 螢幕向量，還原至「直立座標系」以辨識左右側
+    let cosR = Math.cos(-vh_roll);
+    let sinR = Math.sin(-vh_roll);
     let vd_mathX = vd.x * cosR - (-vd.y) * sinR;
 
-    // 6. 方向判定與基準點切換
-    let isFrontRight = (vd_mathX > 0);
+    let isFrontRight = (vd_mathX > 0); // 若深度線向右代表看到右側面，基準點應在右前角
     let yaw = isFrontRight ? -yawAbs : yawAbs;
     if (Math.abs(vd_mathX) < 5) {
         yaw = 0;
-        isFrontRight = false; // 正面無偏角
+        isFrontRight = false; // 正面綁定左前角
+    }
+
+    // 6. 決定最終機台的 Roll
+    let rollAngle = vh_roll;
+    
+    if (yawAbs === 0) {
+        // 若判定為正面 (Yaw=0)，強制將 3D 機台的本體旋轉對準「寬度黃線 (vw)」
+        let baseRoll = Math.atan2(-vw.y, vw.x);
+        
+        // 若基準點是右前角 (使用者是從右拉向左畫黃線)，黃線指向 -X 方向，
+        // 必須把機台的 Local X 也翻轉 180 度，才能讓兩者完美貼齊。
+        if (isFrontRight) {
+            baseRoll += Math.PI;
+        }
+
+        // 以高度線的 Y 座標系來防呆上下顛倒
+        let heightAngle = Math.atan2(-vh.y, vh.x);
+        let proposedYAngle = baseRoll + Math.PI / 2;
+        let diff = heightAngle - proposedYAngle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        
+        if (Math.abs(diff) > Math.PI / 2) {
+            baseRoll += Math.PI; // 顛倒修正
+        }
+        
+        rollAngle = baseRoll;
     }
 
     photoGroup.rotation.set(0, yaw, rollAngle); 
