@@ -19,8 +19,7 @@ let placedBillboards = []; // 存放已放置的機台
 let currentRealWidth = 1;
 let currentRealDepth = 1;
 let drawState = 0; // 0: none, 1: drawing W, 2: drawing D
-let anchor_O = {x:0, y:0};
-let vec_w = {x:0, y:0}, vec_d = {x:0, y:0};
+let p_w1 = null, p_w2 = null, p_d1 = null, p_d2 = null;
 
 // ------------------------------------------------------------------
 // 1. 初始化介面與 GPS API
@@ -867,8 +866,38 @@ function updateLineSVG(id, p1, p2) {
     line.setAttribute('visibility', 'visible');
 }
 
-function applyPerspectiveTransform(vw, vd, anchor_O) {
+// 直線交點公式
+function getIntersection(a1, a2, b1, b2) {
+    const denom = (a1.x - a2.x) * (b1.y - b2.y) - (a1.y - a2.y) * (b1.x - b2.x);
+    if (Math.abs(denom) < 0.0001) return null; // 平行
+    const ix = ((a1.x * a2.y - a1.y * a2.x) * (b1.x - b2.x) - (a1.x - a2.x) * (b1.x * b2.y - b1.y * b2.x)) / denom;
+    const iy = ((a1.x * a2.y - a1.y * a2.x) * (b1.y - b2.y) - (a1.y - a2.y) * (b1.x * b2.y - b1.y * b2.x)) / denom;
+    return { x: ix, y: iy };
+}
+
+function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
     if (!photoGroup || !photoCamera) return;
+
+    // 計算兩條線的延長線交點作為 Anchor O
+    let anchor_O = getIntersection(pw1, pw2, pd1, pd2);
+    
+    // 如果平行，退回去強制把 pw1 送給 anchor
+    if (!anchor_O) {
+        anchor_O = pw1; 
+    }
+
+    // 取得遠離 Anchor 的那端作為方向點
+    let dW1 = Math.hypot(pw1.x - anchor_O.x, pw1.y - anchor_O.y);
+    let dW2 = Math.hypot(pw2.x - anchor_O.x, pw2.y - anchor_O.y);
+    let pW_far = (dW1 > dW2) ? pw1 : pw2;
+
+    let dD1 = Math.hypot(pd1.x - anchor_O.x, pd1.y - anchor_O.y);
+    let dD2 = Math.hypot(pd2.x - anchor_O.x, pd2.y - anchor_O.y);
+    let pD_far = (dD1 > dD2) ? pd1 : pd2;
+
+    // 更新畫面上的 SVG，讓線條精美地接到交點上
+    updateLineSVG('line-width', anchor_O, pW_far);
+    updateLineSVG('line-depth', anchor_O, pD_far);
 
     // 將螢幕 2D 座標轉換為 NDC (-1 ~ +1)
     function ndc(p) {
@@ -877,11 +906,6 @@ function applyPerspectiveTransform(vw, vd, anchor_O) {
             -(p.y / window.innerHeight) * 2 + 1
         );
     }
-
-    // 取得兩條線的起終點像素座標 (全部由 anchor_O 出發)
-    let p1 = anchor_O;
-    let pW = { x: anchor_O.x + vw.x, y: anchor_O.y + vw.y };
-    let pD = { x: anchor_O.x + vd.x, y: anchor_O.y + vd.y };
 
     // 射線投射至 3D 地平面 (假設地平面在 Y = -1.5)
     const floorY = -1.5;
@@ -894,22 +918,19 @@ function applyPerspectiveTransform(vw, vd, anchor_O) {
         if (raycaster.ray.intersectPlane(plane, intersection)) {
             return intersection;
         }
-        // 如果射向天空，則在距離相機 10 米處強制建立一點作為備援
         return raycaster.ray.at(10, new THREE.Vector3());
     }
 
-    let P1 = getFloorPoint(p1);
-    let PW = getFloorPoint(pW);
-    let PD = getFloorPoint(pD);
+    let P1 = getFloorPoint(anchor_O);
+    let PW = getFloorPoint(pW_far);
+    let PD = getFloorPoint(pD_far);
 
     // 建立 3D 空間的方向向量
     let dirX = new THREE.Vector3().subVectors(PW, P1).normalize(); // 寬度方向 (+X)
-    let dirZ = new THREE.Vector3().subVectors(P1, PD).normalize(); // 深度方向 (+Z，從後往前看)
+    let dirZ = new THREE.Vector3().subVectors(PD, P1).normalize(); // 深度線的方向 (通常是往後，即 -Z)
 
     // 因為手機拍攝照片可能略有歪斜，我們強制讓 Y 軸維持絕對垂直
-    // 重新正交化 (Gram-Schmidt)
     let upY = new THREE.Vector3(0, 1, 0);
-    // 寬度線的方向向量投影到水平面後的方向
     dirX.y = 0; dirX.normalize();
 
     // 建立旋轉矩陣
@@ -918,10 +939,13 @@ function applyPerspectiveTransform(vw, vd, anchor_O) {
     // 機台 Z 軸 = dirX x upY
     let finalZ = new THREE.Vector3().crossVectors(dirX, upY);
     
-    // 如果使用者拖曳深度線的方向與預期方向相反 (即 Z 指向相機背後)，翻轉 Z
-    if (finalZ.dot(new THREE.Vector3().subVectors(P1, PD)) < 0) {
-        // 這表示 PD 在 dirX 的某一側使得叉積反向
-        // 我們通常希望正面面向相機，所以 check PD vs P1 的 z 座標
+    // finalZ 是正前方 (+Z 端)。機台深度實際是向著 -Z 延伸。
+    // 如果使用者是由前緣往後畫深度線，則 dirZ 代表 -Z 方向。
+    // 因此 finalZ 應該與 dirZ 夾角大於 90 度 (內積 < 0)。
+    // 如果內積 > 0，代表我們找出的正面其實朝向相機背後，我們應將其旋轉 180 度。
+    if (finalZ.dot(dirZ) > 0) {
+        finalZ.negate();
+        dirX.negate(); // 必須一起反向以維持右手系 (Y 不動)
     }
 
     // 更新機台角度
@@ -955,19 +979,11 @@ function handlePointerDown(e) {
     if (interactionMode === 'perspective') {
         const p = getEventCoords(e);
         if (drawState === 1) {
-            anchor_O = p;
-            vec_w = {x: 0, y: 0};
-            updateLineSVG('line-width', anchor_O, anchor_O);
-            let anchorEl = document.getElementById('draw-anchor');
-            if (anchorEl) {
-                anchorEl.setAttribute('cx', anchor_O.x);
-                anchorEl.setAttribute('cy', anchor_O.y);
-                anchorEl.setAttribute('visibility', 'visible');
-            }
+            p_w1 = p; p_w2 = p;
+            updateLineSVG('line-width', p_w1, p_w2);
         } else if (drawState === 2) {
-            previousMousePosition = p;
-            vec_d = {x: 0, y: 0};
-            updateLineSVG('line-depth', anchor_O, anchor_O);
+            p_d1 = p; p_d2 = p;
+            updateLineSVG('line-depth', p_d1, p_d2);
         }
         isDragging = true;
         if (e.cancelable) e.preventDefault();
@@ -995,12 +1011,11 @@ function handlePointerMove(e) {
         if (e.cancelable) e.preventDefault();
         const p = getEventCoords(e);
         if (drawState === 1) {
-            vec_w = { x: p.x - anchor_O.x, y: p.y - anchor_O.y };
-            updateLineSVG('line-width', anchor_O, p);
+            p_w2 = p;
+            updateLineSVG('line-width', p_w1, p_w2);
         } else if (drawState === 2) {
-            let delta = { x: p.x - previousMousePosition.x, y: p.y - previousMousePosition.y };
-            vec_d = delta;
-            updateLineSVG('line-depth', anchor_O, { x: anchor_O.x + delta.x, y: anchor_O.y + delta.y });
+            p_d2 = p;
+            updateLineSVG('line-depth', p_d1, p_d2);
         }
         return;
     }
@@ -1042,23 +1057,21 @@ function handlePointerUp(e) {
     if (interactionMode === 'perspective' && isDragging) {
         isDragging = false;
         if (drawState === 1) {
-            if (Math.hypot(vec_w.x, vec_w.y) < 20) {
+            if (Math.hypot(p_w2.x - p_w1.x, p_w2.y - p_w1.y) < 20) {
                 document.getElementById('line-width').setAttribute('visibility', 'hidden');
-                let a = document.getElementById('draw-anchor');
-                if(a) a.setAttribute('visibility', 'hidden');
                 return; 
             }
             drawState = 2;
-            document.getElementById('perspective-hint').textContent = '請在畫面任意處拖曳，畫出【側向深度線】(例如向左後拉)';
+            document.getElementById('perspective-hint').textContent = '請畫出機台側面的【深度線】(兩條線若沒碰在一起會自動延伸計算交點)';
         } else if (drawState === 2) {
-            if (Math.hypot(vec_d.x, vec_d.y) < 20) {
+            if (Math.hypot(p_d2.x - p_d1.x, p_d2.y - p_d1.y) < 20) {
                 document.getElementById('line-depth').setAttribute('visibility', 'hidden');
                 return;
             }
             document.getElementById('perspective-hint').classList.add('hidden');
             
-            // 執行純 Yaw 運算與轉換
-            applyPerspectiveTransform(vec_w, vec_d, anchor_O);
+            // 執行運算與轉換 (交點作為 Anchor，自動投射)
+            applyPerspectiveTransform(p_w1, p_w2, p_d1, p_d2);
             
             // 完成後自動切換回移動模式
             const btnMove = document.getElementById('btn-mode-move');
