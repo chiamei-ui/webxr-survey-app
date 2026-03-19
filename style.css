@@ -306,6 +306,16 @@ input[type="text"] {
   padding-bottom: 10px;
 }
 
+.bottom-right-tools {
+  position: fixed;
+  bottom: calc(30px + env(safe-area-inset-bottom));
+  right: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 20;
+}
+
 .tool-row {
   display: flex;
   gap: 10px;

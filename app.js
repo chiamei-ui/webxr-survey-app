@@ -509,16 +509,11 @@ function onWindowResize() {
         photoCamera.updateProjectionMatrix();
         photoRenderer.setSize(window.innerWidth, window.innerHeight);
 
-        // 即時檢查當下方向並翻轉機台
+        // 移除強制翻轉機台的 checkIsLandscape 邏輯，
+        // 因為照片在匯入時就應該是正的，強迫翻轉會導致使用者在橫屏看相片時機台變成平躺。
         if (photoGroup) {
-            const isLandscape = checkIsLandscape();
-            if (isLandscape) {
-                photoGroup.rotation.z = Math.PI / 2;
-                initialRotation = Math.PI / 2;
-            } else {
-                photoGroup.rotation.z = 0;
-                initialRotation = 0;
-            }
+            photoGroup.rotation.z = 0;
+            initialRotation = 0;
         }
     }
 
@@ -878,99 +873,79 @@ function getIntersection(a1, a2, b1, b2) {
 function applyPerspectiveTransform(pw1, pw2, pd1, pd2) {
     if (!photoGroup || !photoCamera) return;
 
-    // 計算兩條線的延長線交點作為 Anchor O
+    // 1. 取得交點 (Anchor)
     let anchor_O = getIntersection(pw1, pw2, pd1, pd2);
-    
-    // 如果平行，退回去強制把 pw1 送給 anchor
-    if (!anchor_O) {
-        anchor_O = pw1; 
-    }
+    if (!anchor_O) anchor_O = pw1;
 
-    // 取得遠離 Anchor 的那端作為方向點
+    // 2. 決定向量遠端
     let dW1 = Math.hypot(pw1.x - anchor_O.x, pw1.y - anchor_O.y);
     let dW2 = Math.hypot(pw2.x - anchor_O.x, pw2.y - anchor_O.y);
-    let pW_far = (dW1 > dW2) ? pw1 : pw2;
+    let pW = (dW1 > dW2) ? pw1 : pw2;
 
     let dD1 = Math.hypot(pd1.x - anchor_O.x, pd1.y - anchor_O.y);
     let dD2 = Math.hypot(pd2.x - anchor_O.x, pd2.y - anchor_O.y);
-    let pD_far = (dD1 > dD2) ? pd1 : pd2;
+    let pD = (dD1 > dD2) ? pd1 : pd2;
 
-    // 更新畫面上的 SVG，讓線條精美地接到交點上
-    updateLineSVG('line-width', anchor_O, pW_far);
-    updateLineSVG('line-depth', anchor_O, pD_far);
+    updateLineSVG('line-width', anchor_O, pW);
+    updateLineSVG('line-depth', anchor_O, pD);
 
-    // 將螢幕 2D 座標轉換為 NDC (-1 ~ +1)
-    function ndc(p) {
-        return new THREE.Vector2(
-            (p.x / window.innerWidth) * 2 - 1,
-            -(p.y / window.innerHeight) * 2 + 1
-        );
+    let vw = { x: pW.x - anchor_O.x, y: pW.y - anchor_O.y };
+    let vd = { x: pD.x - anchor_O.x, y: pD.y - anchor_O.y };
+
+    let wLen = Math.hypot(vw.x, vw.y);
+    let dLen = Math.hypot(vd.x, vd.y);
+    if (wLen < 5) return;
+
+    // 3. 計算 Yaw 角度 (利用純比例解法，不依賴可能失敗的 3D 相機 Pitch 射線投影)
+    let tanYaw = (dLen * currentRealWidth) / (wLen * currentRealDepth);
+    let yawAbs = Math.atan(tanYaw);
+    yawAbs = Math.min(yawAbs, Math.PI * 80 / 180); // 鎖死最大 80 度，絕對不允許背面朝著攝影機
+
+    // 4. 方向判定與基準點切換
+    // 在螢幕座標上(Y向下)，如果深度線向左 (vd.x < 0)，代表我們看見機台左側面，
+    // 這意味著相機在左前方，機台 Yaw 應朝向右 (Yaw > 0)
+    // 同時這代表最靠近我們的角是左前角 (isFrontRight = false)
+    let isFrontRight = (vd.x > 0);
+    let yaw = isFrontRight ? -yawAbs : yawAbs;
+    if (Math.abs(vd.x) < 5) {
+        yaw = 0;
+        isFrontRight = false; // 正面無偏角
     }
 
-    // 射線投射至 3D 地平面 (假設地平面在 Y = -1.5)
-    const floorY = -1.5;
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY);
-    const raycaster = new THREE.Raycaster();
+    // 保留使用者可能的 Z 軸旋轉 (例如雙指旋轉)
+    let currentZ = photoGroup.rotation.z;
+    photoGroup.rotation.set(0, yaw, 0); // 先應用 Y
+    photoGroup.rotateZ(currentZ); // 再補回 Z
 
-    function getFloorPoint(p) {
-        raycaster.setFromCamera(ndc(p), photoCamera);
-        let intersection = new THREE.Vector3();
-        if (raycaster.ray.intersectPlane(plane, intersection)) {
-            return intersection;
-        }
-        return raycaster.ray.at(10, new THREE.Vector3());
+    // 5. 換算縮放
+    let visibleHeight = 2 * photoCamera.position.z * Math.tan(THREE.MathUtils.degToRad(photoCamera.fov / 2));
+    let pixPerMeter = window.innerHeight / visibleHeight;
+    let cosYaw = Math.cos(yaw);
+    let modelScale;
+    if (Math.abs(cosYaw) > 0.1) {
+        modelScale = wLen / (currentRealWidth * Math.abs(cosYaw) * pixPerMeter);
+    } else {
+        modelScale = dLen / (currentRealDepth * Math.abs(Math.sin(yaw)) * pixPerMeter);
     }
+    photoGroup.scale.set(modelScale, modelScale, modelScale);
 
-    let P1 = getFloorPoint(anchor_O);
-    let PW = getFloorPoint(pW_far);
-    let PD = getFloorPoint(pD_far);
+    // 6. 定位：將 Anchor 對齊使用者的交點 2D 螢幕位置
+    let ndcX = (anchor_O.x / window.innerWidth) * 2 - 1;
+    let ndcY = -(anchor_O.y / window.innerHeight) * 2 + 1;
+    let targetPos = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(photoCamera);
+    let dir = targetPos.sub(photoCamera.position).normalize();
+    let worldPos = photoCamera.position.clone().add(dir.multiplyScalar(photoCamera.position.z));
 
-    // 建立 3D 空間的方向向量
-    let dirX = new THREE.Vector3().subVectors(PW, P1).normalize(); // 寬度方向 (+X)
-    let dirZ = new THREE.Vector3().subVectors(PD, P1).normalize(); // 深度線的方向 (通常是往後，即 -Z)
-
-    // 因為手機拍攝照片可能略有歪斜，我們強制讓 Y 軸維持絕對垂直
-    let upY = new THREE.Vector3(0, 1, 0);
-    dirX.y = 0; dirX.normalize();
-
-    // 建立旋轉矩陣
-    // 機台 X 軸 = dirX
-    // 機台 Y 軸 = upY
-    // 機台 Z 軸 = dirX x upY
-    let finalZ = new THREE.Vector3().crossVectors(dirX, upY);
-    
-    // finalZ 是正前方 (+Z 端)。機台深度實際是向著 -Z 延伸。
-    // 如果使用者是由前緣往後畫深度線，則 dirZ 代表 -Z 方向。
-    // 因此 finalZ 應該與 dirZ 夾角大於 90 度 (內積 < 0)。
-    // 如果內積 > 0，代表我們找出的正面其實朝向相機背後，我們應將其旋轉 180 度。
-    // 同時這也意味著使用者是從右前角 (Front-Right) 作為交點。
-    let isFrontRight = false;
-    if (finalZ.dot(dirZ) > 0) {
-        finalZ.negate();
-        dirX.negate(); // 必須一起反向以維持右手系 (Y 不動)
-        isFrontRight = true;
-    }
-
-    // 更新機台角度
-    let rotMatrix = new THREE.Matrix4().makeBasis(dirX, upY, finalZ);
-    photoGroup.quaternion.setFromRotationMatrix(rotMatrix);
-
-    // --- 計算縮放 (以寬度線為基準) ---
-    // 3D 寬度向量在 dirX 方向上的投影長度
-    let dist3D = P1.distanceTo(PW);
-    let scale = dist3D / currentRealWidth;
-    photoGroup.scale.set(scale, scale, scale);
-
-    // --- 計算位置 (自動對齊左右角) ---
-    // 預設 rebuildModelGroup 將機台置中於 (0,0,0)，底部前緣在 Z=1, Y=-1, X 範圍 -W/2 ~ W/2
-    // 如果交點在左側 (isFrontRight=false)，對齊 -totalWidth/2
-    // 如果交點在右側 (isFrontRight=true)，對齊 +totalWidth/2
+    // 計算群組在 Local Space 的偏移量
+    // 如果 Anchor 在右側，綁定位置至 +totalWidth/2
+    // 如果 Anchor 在左側，綁定位置至 -totalWidth/2
     let cornerX = isFrontRight ? (currentRealWidth / 2) : (-currentRealWidth / 2);
     let localCorner = new THREE.Vector3(cornerX, -1, 1);
-    let worldOffset = localCorner.clone().multiplyScalar(scale).applyQuaternion(photoGroup.quaternion);
+    
+    // 將世界座標加上群組目前的旋轉
+    let worldOffset = localCorner.clone().multiplyScalar(modelScale).applyQuaternion(photoGroup.quaternion);
 
-    // 令群組的「前底角位置」等於我們投影出的世界點 P1
-    photoGroup.position.copy(P1).sub(worldOffset);
+    photoGroup.position.copy(worldPos).sub(worldOffset);
 }
 
 
