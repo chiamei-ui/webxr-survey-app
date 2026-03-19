@@ -757,15 +757,9 @@ function startCommonARMode() {
     // 初始進入時執行一次繪製
     rebuildModelGroup();
 
-    // 初始判斷當前螢幕是否為橫式
-    const isLandscape = checkIsLandscape();
-    if (isLandscape) {
-        photoGroup.rotation.z = Math.PI / 2;
-        initialRotation = Math.PI / 2;
-    } else {
-        photoGroup.rotation.z = 0;
-        initialRotation = 0;
-    }
+    // 初始進入時將旋轉歸零
+    photoGroup.rotation.z = 0;
+    initialRotation = 0;
 
     photoRenderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
     photoRenderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
@@ -819,19 +813,10 @@ function startLiveVideoMode() {
                 liveVideoElement.play().catch(e => console.warn(e));
 
                 if (photoGroup) {
-                    // 以相機回傳的實際影像比例來決定是否橫向
-                    const cameraIsLandscape = liveVideoElement.videoWidth > liveVideoElement.videoHeight;
-                    // 以視窗比例來決定是否橫向
-                    const windowIsLandscape = checkIsLandscape();
-
-                    // 若相機傳來的是橫的，或視窗是橫的，我們都嘗試將機台打橫
-                    if (cameraIsLandscape || windowIsLandscape) {
-                        photoGroup.rotation.z = Math.PI / 2;
-                        initialRotation = Math.PI / 2;
-                    } else {
-                        photoGroup.rotation.z = 0;
-                        initialRotation = 0;
-                    }
+                    // 照片已經由 navigator.mediaDevices 與 CSS cover 自動妥善排版
+                    // 不再強制將 3D 群組打橫，確保使用者看到的畫面跟 3D 空間視角正交
+                    photoGroup.rotation.z = 0;
+                    initialRotation = 0;
                 }
             };
         })
